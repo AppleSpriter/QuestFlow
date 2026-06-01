@@ -3,8 +3,10 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Archive,
+  BookOpen,
   ChevronRight,
   Flame,
+  Gem,
   Pause,
   Play,
   Plus,
@@ -15,7 +17,7 @@ import {
   Zap
 } from "lucide-react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type AgentName,
   getLevelProgress,
@@ -24,6 +26,12 @@ import {
   type QuestTask,
   useQuestStore
 } from "@/lib/quest-store";
+import { type CompanionMood, getMapRegion } from "@/data/companions";
+import { TaskMapProgress } from "@/components/TaskMapProgress";
+import { RewardToast, type RewardInfo } from "@/components/RewardToast";
+import { GachaModal } from "@/components/GachaModal";
+import { CurrentCompanion } from "@/components/CurrentCompanion";
+import { CompanionCollection } from "@/components/CompanionCollection";
 
 const agents: AgentName[] = ["Codex", "openclaw", "Claude Code", "Gemini", "dodo", "None"];
 
@@ -48,18 +56,9 @@ const relativeTime = (iso: string) => {
   const hour = 60 * minute;
   const day = 24 * hour;
 
-  if (diff < minute) {
-    return "刚刚";
-  }
-
-  if (diff < hour) {
-    return `${Math.floor(diff / minute)} 分钟前`;
-  }
-
-  if (diff < day) {
-    return `${Math.floor(diff / hour)} 小时前`;
-  }
-
+  if (diff < minute) return "刚刚";
+  if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`;
+  if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
   return `${Math.floor(diff / day)} 天前`;
 };
 
@@ -72,16 +71,28 @@ const formatLogTime = (iso: string) =>
     hour12: false
   }).format(new Date(iso));
 
+const regionBackgrounds: Record<string, string> = {
+  camp: "linear-gradient(180deg, #faf9f7 0%, #f0ece6 50%, #e8e2d8 100%)",
+  forest: "linear-gradient(180deg, #f0f9f0 0%, #ddf0dd 50%, #c8e6c8 100%)",
+  canyon: "linear-gradient(180deg, #f5f0f8 0%, #e8ddf0 50%, #d5c8e0 100%)",
+  tower: "linear-gradient(180deg, #f0f4fa 0%, #dde5f0 50%, #c8d5e8 100%)",
+  stars: "linear-gradient(180deg, #f8f5ff 0%, #ede5f8 50%, #ddd0f0 100%)"
+};
+
 export default function QuestFlowPage() {
   const tasks = useQuestStore((state) => state.tasks);
   const logs = useQuestStore((state) => state.logs);
   const focusTaskId = useQuestStore((state) => state.focusTaskId);
   const xp = useQuestStore((state) => state.xp);
+  const crystals = useQuestStore((state) => state.crystals);
   const streak = useQuestStore((state) => state.streak);
   const addTask = useQuestStore((state) => state.addTask);
   const setFocusTask = useQuestStore((state) => state.setFocusTask);
   const updateTaskStatus = useQuestStore((state) => state.updateTaskStatus);
   const progressTask = useQuestStore((state) => state.progressTask);
+  const gachaSingle = useQuestStore((state) => state.gachaSingle);
+  const gachaTen = useQuestStore((state) => state.gachaTen);
+  const isAllActiveProgressedToday = useQuestStore((state) => state.isAllActiveProgressedToday);
 
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
@@ -92,6 +103,10 @@ export default function QuestFlowPage() {
   const [pulseTaskId, setPulseTaskId] = useState<string | null>(null);
   const [focusFlash, setFocusFlash] = useState(false);
   const [celebration, setCelebration] = useState<ProgressResult | null>(null);
+  const [rewardInfo, setRewardInfo] = useState<RewardInfo | null>(null);
+  const [showGacha, setShowGacha] = useState(false);
+  const [showCollection, setShowCollection] = useState(false);
+  const [companionMood, setCompanionMood] = useState<CompanionMood>("idle");
 
   useEffect(() => {
     setMounted(true);
@@ -117,11 +132,7 @@ export default function QuestFlowPage() {
 
   const createQuest = () => {
     const newTaskId = addTask(title, agent);
-
-    if (!newTaskId) {
-      return;
-    }
-
+    if (!newTaskId) return;
     setTitle("");
     setStatusFilter("active");
     if (!focusTaskId) {
@@ -136,38 +147,54 @@ export default function QuestFlowPage() {
   };
 
   const changeFocus = (taskId: string) => {
-    if (taskId === focusTaskId) {
-      return;
-    }
-
+    if (taskId === focusTaskId) return;
     setFocusTask(taskId);
     setFocusFlash(true);
+    setCompanionMood("focusChange");
     window.setTimeout(() => setFocusFlash(false), 320);
   };
 
-  const pushProgress = (taskId: string, note?: string) => {
+  const pushProgress = useCallback((taskId: string, note?: string) => {
     const result = progressTask(taskId, note);
-
-    if (!result) {
-      return;
-    }
+    if (!result) return;
 
     setLastProgress(result);
     setPulseTaskId(taskId);
+    setRewardInfo({
+      xp: result.xpAwarded,
+      crystals: result.crystalsAwarded,
+      firstOfDay: result.firstOfDay,
+      milestone: result.milestone,
+      newRegion: result.newRegion,
+      momentum: result.momentum
+    });
+
+    // Companion mood
+    if (result.momentum >= 3) {
+      setCompanionMood("momentum");
+    } else {
+      setCompanionMood("progress");
+    }
+
     window.setTimeout(() => setPulseTaskId(null), 760);
     window.setTimeout(() => setLastProgress(null), 1200);
+    window.setTimeout(() => setRewardInfo(null), 2500);
 
     if (result.milestone) {
       setCelebration(result);
       window.setTimeout(() => setCelebration(null), 1150);
     }
-  };
+
+    // Check all active progressed
+    setTimeout(() => {
+      if (isAllActiveProgressedToday()) {
+        setCompanionMood("allActiveProgressed");
+      }
+    }, 100);
+  }, [progressTask, isAllActiveProgressedToday]);
 
   const pushFocusProgress = () => {
-    if (!focusTask) {
-      return;
-    }
-
+    if (!focusTask) return;
     pushProgress(focusTask.id, progressNote);
     setProgressNote("");
   };
@@ -180,13 +207,23 @@ export default function QuestFlowPage() {
     );
   }
 
+  const focusRegionId = focusTask ? getMapRegion(focusTask.progressCount).id : "camp";
+  const focusBg = regionBackgrounds[focusRegionId] ?? regionBackgrounds.camp;
+
   return (
-    <main className="mx-auto min-h-screen w-full max-w-6xl px-4 py-5 sm:px-6 lg:px-8">
+    <motion.main
+      className="mx-auto min-h-screen w-full max-w-6xl px-4 py-5 sm:px-6 lg:px-8"
+      animate={{ background: focusBg }}
+      transition={{ duration: 1.2, ease: "easeInOut" }}
+    >
       <AnimatePresence>
         {focusFlash ? <FocusChangedOverlay /> : null}
         {celebration ? <MilestoneOverlay result={celebration} /> : null}
       </AnimatePresence>
 
+      <RewardToast reward={rewardInfo} />
+
+      {/* Header */}
       <header className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -198,7 +235,7 @@ export default function QuestFlowPage() {
           <p className="mt-1 text-sm text-slate-500">Progress Tracker for agent-heavy work</p>
         </div>
 
-        <section className="grid grid-cols-3 gap-2 sm:min-w-[440px]">
+        <section className="grid grid-cols-4 gap-2 sm:min-w-[540px]">
           <Metric label={`Level ${level.level}`} value={`${level.current} / ${level.required} XP`}>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
               <motion.div
@@ -212,19 +249,41 @@ export default function QuestFlowPage() {
           <Metric label="Streak" value={`${streak.count} 天`}>
             <Flame size={18} className="mt-2 text-amber-500" />
           </Metric>
+          <Metric label="Crystal" value={`${crystals} 💎`}>
+            <Gem size={18} className="mt-2 text-violet-500" />
+          </Metric>
           <Metric label="Active" value={`${activeTasks.length} quests`}>
             <Target size={18} className="mt-2 text-emerald-600" />
           </Metric>
         </section>
       </header>
 
+      {/* Action bar: Gacha + Collection */}
+      <div className="mb-3 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setShowGacha(true)}
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
+        >
+          <Sparkles size={16} />
+          召唤伙伴
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowCollection(true)}
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100"
+        >
+          <BookOpen size={16} />
+          伙伴图鉴
+        </button>
+      </div>
+
+      {/* Create form */}
       <form
         onSubmit={submitTask}
         className="mb-5 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
       >
-        <label className="sr-only" htmlFor="quest-title">
-          新建任务
-        </label>
+        <label className="sr-only" htmlFor="quest-title">新建任务</label>
         <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3">
           <Plus size={17} className="shrink-0 text-slate-500" />
           <textarea
@@ -271,6 +330,7 @@ export default function QuestFlowPage() {
         </div>
       </form>
 
+      {/* Main content */}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_390px]">
         <section className="min-w-0">
           <FocusPanel
@@ -329,19 +389,32 @@ export default function QuestFlowPage() {
           <ProgressLogPanel logs={focusLogs} task={focusTask} />
         </aside>
       </div>
-    </main>
+
+      {/* Current companion */}
+      <CurrentCompanion mood={companionMood} />
+
+      {/* Modals */}
+      <AnimatePresence>
+        {showGacha && (
+          <GachaModal
+            crystals={crystals}
+            onGachaSingle={gachaSingle}
+            onGachaTen={gachaTen}
+            onClose={() => setShowGacha(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {showCollection && (
+        <CompanionCollection onClose={() => setShowCollection(false)} />
+      )}
+    </motion.main>
   );
 }
 
-function Metric({
-  label,
-  value,
-  children
-}: {
-  label: string;
-  value: string;
-  children: ReactNode;
-}) {
+/* ─── Sub-components ────────────────────────────────────────────── */
+
+function Metric({ label, value, children }: { label: string; value: string; children: ReactNode }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
       <div className="text-xs font-medium text-slate-500">{label}</div>
@@ -409,6 +482,10 @@ function FocusPanel({
                   <span>最近更新 {relativeTime(task.updatedAt)}</span>
                   {task.status === "paused" ? <span>Paused</span> : null}
                 </div>
+                {/* Map region */}
+                <div className="mt-2">
+                  <TaskMapProgress progressCount={task.progressCount} />
+                </div>
               </div>
               <div className="flex shrink-0 items-baseline gap-2">
                 <motion.span
@@ -472,7 +549,6 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
-      {/* Glowing background burst */}
       {Array.from({ length: 3 }).map((_, i) => (
         <motion.div
           key={`glow-${i}`}
@@ -490,7 +566,6 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
         />
       ))}
 
-      {/* Fast outer ring of particles */}
       {Array.from({ length: 24 }).map((_, index) => {
         const angle = (Math.PI * 2 * index) / 24 + (index % 2 === 0 ? 0.15 : -0.15);
         const distance = 75 + (index % 6) * 14;
@@ -514,7 +589,6 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
         );
       })}
 
-      {/* Slow inner sparkles */}
       {Array.from({ length: 12 }).map((_, index) => {
         const angle = (Math.PI * 2 * index) / 12 + 0.3;
         const distance = 35 + (index % 3) * 12;
@@ -537,7 +611,6 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
         );
       })}
 
-      {/* Rising sparkles */}
       {Array.from({ length: 6 }).map((_, index) => (
         <motion.span
           key={`rise-${index}`}
@@ -554,7 +627,24 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
         />
       ))}
 
-      {/* Result card with bounce */}
+      {/* Crystal burst */}
+      {Array.from({ length: 4 }).map((_, index) => (
+        <motion.span
+          key={`crystal-${index}`}
+          className="particle-diamond"
+          style={{ "--particle-color": "#8b5cf6" } as CSSProperties}
+          initial={{ left: "72%", top: "40%", opacity: 1, scale: 0.5, x: 0, y: 0 }}
+          animate={{
+            opacity: 0,
+            scale: [0.5, 2, 0.3],
+            x: [0, (index % 2 === 0 ? 1 : -1) * (20 + index * 15)],
+            y: [0, -40 - index * 15],
+            rotate: [0, 360]
+          }}
+          transition={{ duration: 1, ease: "easeOut", delay: 0.1 + index * 0.05 }}
+        />
+      ))}
+
       <motion.div
         initial={{ opacity: 0, y: 18, scale: 0.8, rotate: -3 }}
         animate={{ opacity: 1, y: 0, scale: [0.8, 1.12, 0.96, 1], rotate: [-3, 1, 0] }}
@@ -564,6 +654,7 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
       >
         <div className="text-base font-bold text-emerald-700">+1 Progress</div>
         <div className="mt-1 text-sm font-semibold text-slate-600">+{result.xpAwarded} XP</div>
+        <div className="text-sm font-semibold text-violet-600">+{result.crystalsAwarded} 💎</div>
         {result.momentum >= 2 ? (
           <motion.div
             initial={{ scale: 0.8 }}
@@ -573,6 +664,15 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
           >
             <Flame size={12} />
             Momentum x{result.momentum}
+          </motion.div>
+        ) : null}
+        {result.newRegion ? (
+          <motion.div
+            initial={{ scale: 0.8 }}
+            animate={{ scale: [0.8, 1.15, 1] }}
+            className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-700"
+          >
+            🗺️ {result.newRegion}
           </motion.div>
         ) : null}
       </motion.div>
@@ -600,10 +700,7 @@ function QuestCard({
       layout
       animate={
         isPulsing
-          ? {
-              scale: [1, 1.035, 1],
-              borderColor: ["#dde3eb", "#22c55e", "#dde3eb"]
-            }
+          ? { scale: [1, 1.035, 1], borderColor: ["#dde3eb", "#22c55e", "#dde3eb"] }
           : { scale: 1 }
       }
       whileHover={{ y: -2 }}
@@ -629,6 +726,10 @@ function QuestCard({
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">
               {task.status}
             </span>
+          </div>
+          {/* Map region on card */}
+          <div className="mt-2">
+            <TaskMapProgress progressCount={task.progressCount} />
           </div>
         </div>
         <motion.div
@@ -689,17 +790,7 @@ function QuestCard({
   );
 }
 
-function IconButton({
-  onClick,
-  title,
-  label,
-  children
-}: {
-  onClick: () => void;
-  title: string;
-  label: string;
-  children: ReactNode;
-}) {
+function IconButton({ onClick, title, label, children }: { onClick: () => void; title: string; label: string; children: ReactNode }) {
   return (
     <button
       type="button"
@@ -713,15 +804,13 @@ function IconButton({
   );
 }
 
-function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: string; at: string; xpAwarded: number; progressCount: number }>; task?: QuestTask }) {
+function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: string; at: string; xpAwarded: number; crystalsAwarded: number; progressCount: number }>; task?: QuestTask }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-950">Progress Log</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            {task ? task.title : "No focus quest"}
-          </p>
+          <p className="mt-1 text-sm text-slate-500">{task ? task.title : "No focus quest"}</p>
         </div>
         <ChevronRight size={19} className="text-slate-400" />
       </div>
@@ -738,9 +827,14 @@ function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: stri
             >
               <div className="flex items-center justify-between gap-2">
                 <time className="text-xs font-semibold text-slate-500">{formatLogTime(log.at)}</time>
-                <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">
-                  +{log.xpAwarded} XP
-                </span>
+                <div className="flex gap-2">
+                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">
+                    +{log.xpAwarded} XP
+                  </span>
+                  <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-semibold text-violet-700">
+                    +{log.crystalsAwarded} 💎
+                  </span>
+                </div>
               </div>
               <p className="mt-2 break-words text-sm font-medium text-slate-900">{log.note}</p>
               <p className="mt-2 text-xs text-slate-500">Progress {log.progressCount}</p>
@@ -803,7 +897,6 @@ function MilestoneOverlay({ result }: { result: ProgressResult }) {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.16 }}
     >
-      {/* Milestone fireworks */}
       {Array.from({ length: 30 }).map((_, index) => {
         const angle = (Math.PI * 2 * index) / 30;
         const distance = 100 + (index % 5) * 30;
@@ -844,6 +937,7 @@ function MilestoneOverlay({ result }: { result: ProgressResult }) {
           已推进 {result.milestone} 次
         </div>
         <div className="mt-2 text-base font-semibold text-amber-600">Milestone +50 XP</div>
+        <div className="text-base font-semibold text-violet-600">+{result.crystalsAwarded} 💎</div>
       </motion.div>
     </motion.div>
   );
