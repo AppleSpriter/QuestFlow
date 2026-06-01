@@ -3,28 +3,28 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
-  ALL_COMPANIONS,
-  type Companion,
-  type CompanionRarity,
-  getCompanionLine,
-  type CompanionMood,
-  getMapRegion,
-  rollCompanion,
-  rollTen,
-  GACHA_COST_SINGLE,
-  GACHA_COST_TEN
-} from "@/data/companions";
+  type ClassName,
+  type ClassState,
+  type SkillCheckResult,
+  type OwnedSkill,
+  initClassState,
+  getClassLevel,
+  rollSkillCheck,
+  learnSkillFromScroll,
+  getLineById,
+  getSkillNameAtTier,
+  getTierFromCopies,
+  getMapRegion
+} from "@/data/classes";
 
 export type QuestStatus = "active" | "paused" | "archived";
-export type AgentName = "Codex" | "openclaw" | "Claude Code" | "Gemini" | "dodo" | "None";
 
 export type QuestTask = {
   id: string;
   title: string;
-  description?: string;
   progressCount: number;
   status: QuestStatus;
-  agent: AgentName;
+  className: ClassName;
   createdAt: string;
   updatedAt: string;
   lastFocusedAt?: string;
@@ -36,8 +36,12 @@ export type ProgressLog = {
   note: string;
   at: string;
   xpAwarded: number;
-  crystalsAwarded: number;
+  classXpAwarded: number;
   progressCount: number;
+  skillCheck?: SkillCheckResult;
+  scrollEarned?: string;
+  newSkill?: string;
+  skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
 };
 
 export type ProgressResult = {
@@ -45,26 +49,17 @@ export type ProgressResult = {
   taskTitle: string;
   progressCount: number;
   xpAwarded: number;
-  crystalsAwarded: number;
+  classXpAwarded: number;
   momentum: number;
   milestone?: number;
   newRegion?: string;
   streak: number;
   firstOfDay: boolean;
+  skillCheck?: SkillCheckResult;
+  scrollEarned?: string;
+  newSkill?: string;
+  skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
   at: string;
-};
-
-export type OwnedCompanion = {
-  id: string;
-  owned: boolean;
-  level: number;
-  copies: number;
-  obtainedAt?: string;
-};
-
-export type GachaResult = {
-  companion: Companion;
-  isNew: boolean;
 };
 
 type StreakState = {
@@ -76,32 +71,23 @@ type QuestStore = {
   tasks: QuestTask[];
   logs: ProgressLog[];
   focusTaskId?: string;
-  xp: number;
-  crystals: number;
+  totalXp: number;
   streak: StreakState;
   momentumTaskId?: string;
   momentumCount: number;
-  // 游戏化
-  companions: OwnedCompanion[];
-  activeCompanionId?: string;
-  gachaHistory: Array<{ id: string; companionId: string; rarity: CompanionRarity; at: string }>;
-  lastProgressDate?: string; // 用于每日首次判断
-  // Actions
-  addTask: (title: string, agent?: AgentName) => string | null;
+  classStates: Record<ClassName, ClassState>;
+  lastProgressDate?: string;
+  addTask: (title: string, className?: ClassName) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
   progressTask: (taskId: string, note?: string) => ProgressResult | null;
-  gachaSingle: () => GachaResult | null;
-  gachaTen: () => GachaResult[] | null;
-  setActiveCompanion: (companionId: string) => void;
-  getCompanionLineForMood: (mood: CompanionMood) => string;
-  isAllActiveProgressedToday: () => boolean;
+  useScroll: (className: ClassName) => { lineId: string; isNew: boolean; upgraded: boolean; fromTier: number; toTier: number } | null;
   exportData: () => void;
   importData: (jsonString: string) => boolean;
 };
 
 const milestones = new Set([5, 10, 25, 50]);
-const milestoneCrystalBonus: Record<number, number> = { 5: 5, 10: 10, 25: 15, 50: 25 };
+const milestoneXpBonus: Record<number, number> = { 5: 25, 10: 50, 25: 75, 50: 100 };
 
 const makeId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -145,42 +131,20 @@ export const getLevelProgress = (xp: number) => {
   };
 };
 
-const initCompanions = (): OwnedCompanion[] =>
-  ALL_COMPANIONS.map((c) => ({ id: c.id, owned: false, level: 1, copies: 0 }));
-
-const getOwned = (companions: OwnedCompanion[], companionId: string): OwnedCompanion | undefined =>
-  companions.find((c) => c.id === companionId);
-
-const addOrDupe = (companions: OwnedCompanion[], companionId: string): OwnedCompanion[] => {
-  const now = new Date().toISOString();
-  const existing = getOwned(companions, companionId);
-  if (existing?.owned) {
-    return companions.map((c) =>
-      c.id === companionId ? { ...c, copies: c.copies + 1 } : c
-    );
-  }
-  return companions.map((c) =>
-    c.id === companionId ? { ...c, owned: true, copies: 1, obtainedAt: now } : c
-  );
-};
-
 export const useQuestStore = create<QuestStore>()(
   persist(
     (set, get) => ({
       tasks: [],
       logs: [],
       focusTaskId: undefined,
-      xp: 0,
-      crystals: 0,
+      totalXp: 0,
       streak: { count: 0 },
       momentumTaskId: undefined,
       momentumCount: 0,
-      companions: initCompanions(),
-      activeCompanionId: undefined,
-      gachaHistory: [],
+      classStates: initClassState(),
       lastProgressDate: undefined,
 
-      addTask: (rawTitle, agent = "openclaw") => {
+      addTask: (rawTitle, className: ClassName = "Wizard") => {
         const title = rawTitle.trim();
         if (!title) return null;
         const now = new Date().toISOString();
@@ -189,7 +153,7 @@ export const useQuestStore = create<QuestStore>()(
           title,
           progressCount: 0,
           status: "active",
-          agent,
+          className,
           createdAt: now,
           updatedAt: now,
           lastFocusedAt: now
@@ -239,35 +203,55 @@ export const useQuestStore = create<QuestStore>()(
           state.momentumTaskId === taskId ? state.momentumCount + 1 : 1;
         const momentumBonus = momentum >= 3 ? 10 : 0;
         const milestone = milestones.has(progressCount) ? progressCount : undefined;
-        const milestoneBonus = milestone ? 50 : 0;
-        const xpAwarded = 5 + momentumBonus + milestoneBonus;
+        const milestoneBonus = milestone ? (milestoneXpBonus[milestone] ?? 50) : 0;
+        const baseXp = 5 + momentumBonus + milestoneBonus;
 
-        // Crystals
-        let crystalsAwarded = 1; // 基础
-        if (momentum >= 3) crystalsAwarded += 3; // 连续推进
-        if (milestone && milestoneCrystalBonus[milestone]) {
-          crystalsAwarded += milestoneCrystalBonus[milestone];
+        // Class XP
+        let classXpAwarded = 5;
+        let scrollsAwarded = 0;
+
+        // Skill check (50% chance)
+        let skillCheck: SkillCheckResult | undefined;
+        const triggerCheck = Math.random() < 0.5;
+        if (triggerCheck) {
+          const classLevel = getClassLevel(state.classStates[task.className].xp);
+          skillCheck = rollSkillCheck(task.className, classLevel);
+          classXpAwarded += skillCheck.xpBonus;
+
+          // Scroll on critical
+          if (skillCheck.scrollEarned) {
+            scrollsAwarded = 1;
+          }
         }
-        // 每日首次推进
-        const today = getLocalDayKey(now);
-        const firstOfDay = state.lastProgressDate !== today;
-        if (firstOfDay) crystalsAwarded += 3;
 
-        // 地图区域变化
+        // Map region change
         const oldRegion = getMapRegion(task.progressCount);
         const newRegionData = getMapRegion(progressCount);
         const newRegion = oldRegion.id !== newRegionData.id ? newRegionData.name : undefined;
 
         const nextStreakState = nextStreak(state.streak, now);
+        const today = getLocalDayKey(now);
+        const firstOfDay = state.lastProgressDate !== today;
         const note = rawNote?.trim() || "推进一步";
+
         const log: ProgressLog = {
           id: makeId(),
           taskId,
           note,
           at,
-          xpAwarded,
-          crystalsAwarded,
-          progressCount
+          xpAwarded: baseXp,
+          classXpAwarded,
+          progressCount,
+          skillCheck,
+          scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined
+        };
+
+        // Update class XP and scrolls
+        const updatedClassStates = { ...state.classStates };
+        updatedClassStates[task.className] = {
+          ...updatedClassStates[task.className],
+          xp: updatedClassStates[task.className].xp + classXpAwarded,
+          scrolls: updatedClassStates[task.className].scrolls + scrollsAwarded
         };
 
         set({
@@ -283,11 +267,11 @@ export const useQuestStore = create<QuestStore>()(
           ),
           logs: [log, ...state.logs],
           focusTaskId: taskId,
-          xp: state.xp + xpAwarded,
-          crystals: state.crystals + crystalsAwarded,
+          totalXp: state.totalXp + baseXp,
           streak: nextStreakState,
           momentumTaskId: taskId,
           momentumCount: momentum,
+          classStates: updatedClassStates,
           lastProgressDate: firstOfDay ? today : state.lastProgressDate
         });
 
@@ -295,104 +279,69 @@ export const useQuestStore = create<QuestStore>()(
           taskId,
           taskTitle: task.title,
           progressCount,
-          xpAwarded,
-          crystalsAwarded,
+          xpAwarded: baseXp,
+          classXpAwarded,
           momentum,
           milestone,
           newRegion,
           streak: nextStreakState.count,
           firstOfDay,
+          skillCheck,
+          scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined,
           at
         };
       },
 
-      gachaSingle: () => {
+      useScroll: (className: ClassName) => {
         const state = get();
-        if (state.crystals < GACHA_COST_SINGLE) return null;
-        const companion = rollCompanion();
-        const existing = getOwned(state.companions, companion.id);
-        const isNew = !existing?.owned;
-        const now = new Date().toISOString();
+        const cs = state.classStates[className];
+        if (cs.scrolls <= 0) return null;
 
-        set({
-          crystals: state.crystals - GACHA_COST_SINGLE,
-          companions: addOrDupe(state.companions, companion.id),
-          gachaHistory: [
-            { id: makeId(), companionId: companion.id, rarity: companion.rarity, at: now },
-            ...state.gachaHistory
-          ],
-          activeCompanionId: isNew ? companion.id : state.activeCompanionId
-        });
+        const result = learnSkillFromScroll(className, cs.skills);
+        if (!result) return null;
 
-        return { companion, isNew };
-      },
+        const updatedSkills = [...cs.skills];
+        const existingIdx = updatedSkills.findIndex((s) => s.lineId === result.lineId);
 
-      gachaTen: () => {
-        const state = get();
-        if (state.crystals < GACHA_COST_TEN) return null;
-        const rolled = rollTen();
-        const results: GachaResult[] = [];
-        let newCompanionId: string | undefined;
-        const now = new Date().toISOString();
-        let updatedCompanions = state.companions;
-
-        for (const companion of rolled) {
-          const existing = getOwned(updatedCompanions, companion.id);
-          const isNew = !existing?.owned;
-          if (isNew) newCompanionId = companion.id;
-          updatedCompanions = addOrDupe(updatedCompanions, companion.id);
-          results.push({ companion, isNew });
+        if (existingIdx >= 0) {
+          const existing = updatedSkills[existingIdx];
+          const newCopies = existing.copies + 1;
+          updatedSkills[existingIdx] = {
+            ...existing,
+            copies: newCopies,
+            currentTier: getTierFromCopies(newCopies)
+          };
+        } else {
+          updatedSkills.push({
+            lineId: result.lineId,
+            copies: 1,
+            currentTier: 1
+          });
         }
 
-        const newHistory = rolled.map((c) => ({
-          id: makeId(),
-          companionId: c.id,
-          rarity: c.rarity,
-          at: now
-        }));
-
         set({
-          crystals: state.crystals - GACHA_COST_TEN,
-          companions: updatedCompanions,
-          gachaHistory: [...newHistory, ...state.gachaHistory],
-          activeCompanionId: newCompanionId ?? state.activeCompanionId
+          classStates: {
+            ...state.classStates,
+            [className]: { ...cs, scrolls: cs.scrolls - 1, skills: updatedSkills }
+          }
         });
 
-        return results;
-      },
-
-      setActiveCompanion: (companionId) => {
-        set({ activeCompanionId: companionId });
-      },
-
-      getCompanionLineForMood: (mood: CompanionMood) => {
-        return getCompanionLine(mood);
-      },
-
-      isAllActiveProgressedToday: () => {
-        const state = get();
-        const today = getLocalDayKey(new Date());
-        const activeTasks = state.tasks.filter((t) => t.status === "active");
-        if (activeTasks.length === 0) return false;
-        return activeTasks.every((t) => getLocalDayKey(new Date(t.updatedAt)) === today);
+        return result;
       },
 
       exportData: () => {
         const state = get();
         const data = {
-          version: 2,
+          version: 3,
           exportedAt: new Date().toISOString(),
           tasks: state.tasks,
           logs: state.logs,
           focusTaskId: state.focusTaskId,
-          xp: state.xp,
-          crystals: state.crystals,
+          totalXp: state.totalXp,
           streak: state.streak,
           momentumTaskId: state.momentumTaskId,
           momentumCount: state.momentumCount,
-          companions: state.companions,
-          activeCompanionId: state.activeCompanionId,
-          gachaHistory: state.gachaHistory,
+          classStates: state.classStates,
           lastProgressDate: state.lastProgressDate
         };
         const json = JSON.stringify(data, null, 2);
@@ -410,27 +359,16 @@ export const useQuestStore = create<QuestStore>()(
       importData: (jsonString: string): boolean => {
         try {
           const data = JSON.parse(jsonString);
-          if (!data.version || !data.tasks) return false;
-          // v1 数据兼容
-          if (data.version === 1) {
-            data.crystals = 0;
-            data.companions = initCompanions();
-            data.activeCompanionId = undefined;
-            data.gachaHistory = [];
-            data.lastProgressDate = undefined;
-          }
+          if (!data.tasks) return false;
           set({
             tasks: data.tasks ?? [],
             logs: data.logs ?? [],
             focusTaskId: data.focusTaskId,
-            xp: data.xp ?? 0,
-            crystals: data.crystals ?? 0,
+            totalXp: data.totalXp ?? 0,
             streak: data.streak ?? { count: 0 },
             momentumTaskId: data.momentumTaskId,
             momentumCount: data.momentumCount ?? 0,
-            companions: data.companions ?? initCompanions(),
-            activeCompanionId: data.activeCompanionId,
-            gachaHistory: data.gachaHistory ?? [],
+            classStates: data.classStates ?? initClassState(),
             lastProgressDate: data.lastProgressDate
           });
           return true;
@@ -442,20 +380,40 @@ export const useQuestStore = create<QuestStore>()(
     {
       name: "questflow-v1",
       storage: createJSONStorage(() => localStorage),
-      version: 2,
+      version: 5,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;
-        if (version === 1) {
-          return {
+        let data = persisted;
+
+        if (version < 3) {
+          data = {
             ...persisted,
-            crystals: 0,
-            companions: initCompanions(),
-            activeCompanionId: undefined,
-            gachaHistory: [],
+            totalXp: persisted.xp ?? 0,
+            classStates: initClassState(),
             lastProgressDate: undefined
           };
         }
-        return persisted;
+
+        // v3→v4: recompute all skill tiers from copies using 2^(n-1) formula
+        if (version < 4 && data.classStates) {
+          const cs = data.classStates as Record<string, { skills: OwnedSkill[] }>;
+          for (const key of Object.keys(cs)) {
+            cs[key].skills = cs[key].skills.map((s) => ({
+              ...s,
+              currentTier: getTierFromCopies(s.copies)
+            }));
+          }
+        }
+
+        // v4→v5: reset skills to new line-based system (incompatible structure change)
+        if (version < 5 && data.classStates) {
+          const cs = data.classStates as Record<string, { skills: unknown[]; scrolls: number }>;
+          for (const key of Object.keys(cs)) {
+            cs[key].skills = [];
+          }
+        }
+
+        return data;
       }
     }
   )

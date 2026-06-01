@@ -1,6 +1,6 @@
 "use client";
 
-import { getMapRegion, MAP_REGIONS } from "@/data/companions";
+import { getMapRegion, MAP_REGIONS } from "@/data/classes";
 
 export function TaskMapProgress({ progressCount }: { progressCount: number }) {
   const current = getMapRegion(progressCount);
