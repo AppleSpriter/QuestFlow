@@ -8,6 +8,7 @@ import { CLASS_META, getTierLabel } from "@/data/classes";
 export type SkillCheckInfo = {
   check: SkillCheckResult;
   scrollEarned?: string;
+  scrollCount?: number;
   newSkill?: string;
   skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
 };
@@ -72,10 +73,15 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
                     </motion.span>
                   ) : (
                     <span>
-                      DC {info.check.dc} · 投骰 {info.check.roll}+{info.check.modifier} = {info.check.roll + info.check.modifier}
+                      Lv{info.check.classLevel} · DC {info.check.dc} · 投骰 {info.check.roll}+{info.check.modifier} = {info.check.roll + info.check.modifier}
                     </span>
                   )}
                 </div>
+                {!rolling && info.check.advantageTriggered && (
+                  <div className="mt-0.5 text-[11px] font-semibold text-sky-600">
+                    等级优势：{info.check.naturalRolls.join(" / ")} 取高
+                  </div>
+                )}
               </div>
               {!rolling && (
                 <div className={`rounded-full px-3 py-1 text-xs font-bold ${
@@ -107,6 +113,7 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
                 className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800"
               >
                 📜 {info.scrollEarned}
+                {info.scrollCount && info.scrollCount > 1 ? ` x${info.scrollCount}` : ""}
               </motion.div>
             )}
 

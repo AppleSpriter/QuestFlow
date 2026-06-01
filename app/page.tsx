@@ -1,11 +1,12 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import Link from "next/link";
 import {
   Archive,
   BookOpen,
   ChevronRight,
-  Download,
+  Cloud,
   Flame,
   Pause,
   Play,
@@ -14,11 +15,10 @@ import {
   Sparkles,
   Target,
   Trophy,
-  Upload,
   Zap
 } from "lucide-react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getLevelProgress,
   type ProgressResult,
@@ -50,6 +50,9 @@ const classStyles: Record<ClassName, string> = {
   Bard: "border-amber-200 bg-amber-50 text-amber-800",
   Cleric: "border-sky-200 bg-sky-50 text-sky-800"
 };
+
+const getTaskClass = (task: Pick<QuestTask, "className">): ClassName =>
+  task.className && CLASS_META[task.className] ? task.className : "Wizard";
 
 const relativeTime = (iso: string) => {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime());
@@ -86,8 +89,6 @@ export default function QuestFlowPage() {
   const setFocusTask = useQuestStore((state) => state.setFocusTask);
   const updateTaskStatus = useQuestStore((state) => state.updateTaskStatus);
   const progressTask = useQuestStore((state) => state.progressTask);
-  const exportData = useQuestStore((state) => state.exportData);
-  const importData = useQuestStore((state) => state.importData);
 
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
@@ -100,8 +101,6 @@ export default function QuestFlowPage() {
   const [celebration, setCelebration] = useState<ProgressResult | null>(null);
   const [skillCheckInfo, setSkillCheckInfo] = useState<SkillCheckInfo | null>(null);
   const [showSpellbook, setShowSpellbook] = useState(false);
-  const [importStatus, setImportStatus] = useState<"idle" | "success" | "error">("idle");
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -155,6 +154,7 @@ export default function QuestFlowPage() {
       setSkillCheckInfo({
         check: result.skillCheck,
         scrollEarned: result.scrollEarned,
+        scrollCount: result.scrollCount,
         newSkill: result.newSkill,
         skillUpgrade: result.skillUpgrade ? { ...result.skillUpgrade, className: result.skillCheck.className } : undefined
       });
@@ -166,20 +166,6 @@ export default function QuestFlowPage() {
     if (!focusTask) return;
     pushProgress(focusTask.id, progressNote);
     setProgressNote("");
-  };
-
-  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const ok = importData(text);
-      setImportStatus(ok ? "success" : "error");
-      setTimeout(() => setImportStatus("idle"), 2000);
-    };
-    reader.readAsText(file);
-    event.target.value = "";
   };
 
   if (!mounted) {
@@ -265,25 +251,13 @@ export default function QuestFlowPage() {
           Spellbook
         </button>
         <div className="flex-1" />
-        <button
-          type="button"
-          onClick={exportData}
-          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+        <Link
+          href="/sync"
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
         >
-          <Download size={16} />
-          导出
-        </button>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
-        >
-          <Upload size={16} />
-          导入
-        </button>
-        <input ref={fileInputRef} type="file" accept=".json" onChange={handleImportFile} className="hidden" />
-        {importStatus === "success" && <span className="text-sm font-medium text-emerald-600">导入成功</span>}
-        {importStatus === "error" && <span className="text-sm font-medium text-red-600">导入失败</span>}
+          <Cloud size={16} />
+          同步
+        </Link>
       </div>
 
       {/* Create form */}
@@ -303,7 +277,7 @@ export default function QuestFlowPage() {
             }}
             placeholder="新增 Quest，⌘+Enter 创建"
             rows={1}
-            className="focus-ring min-h-11 w-full resize-none bg-transparent text-sm text-slate-950 placeholder:text-slate-400"
+            className="focus-ring min-h-11 w-full resize-none overflow-hidden bg-transparent py-3 text-sm leading-5 text-slate-950 placeholder:text-slate-400"
           />
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -415,6 +389,8 @@ function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }
   task?: QuestTask; note: string; setNote: (v: string) => void; onProgress: () => void;
   lastProgress: ProgressResult | null; isPulsing: boolean;
 }) {
+  const taskClass = task ? getTaskClass(task) : "Wizard";
+
   return (
     <motion.section
       className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-lift"
@@ -433,8 +409,8 @@ function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }
           当前专注
         </div>
         {task ? (
-          <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${classStyles[task.className]}`}>
-            {CLASS_META[task.className].emoji} {task.className}
+          <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${classStyles[taskClass]}`}>
+            {CLASS_META[taskClass].emoji} {taskClass}
           </span>
         ) : null}
       </div>
@@ -549,6 +525,8 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
 function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: {
   task: QuestTask; isFocus: boolean; isPulsing: boolean; onFocus: () => void; onProgress: () => void; onStatus: (s: QuestStatus) => void;
 }) {
+  const taskClass = getTaskClass(task);
+
   return (
     <motion.article layout animate={isPulsing ? { scale: [1, 1.035, 1], borderColor: ["#dde3eb", "#22c55e", "#dde3eb"] } : { scale: 1 }} whileHover={{ y: -2 }} transition={{ duration: 0.55, ease: "easeOut" }}
       className={`rounded-lg border bg-white p-4 shadow-sm ${isFocus ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200"}`}>
@@ -559,8 +537,8 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
             {isFocus && <span className="rounded-full bg-slate-950 px-2 py-1 text-xs font-semibold text-white">Focus</span>}
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
-            <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${classStyles[task.className]}`}>
-              {CLASS_META[task.className].emoji} {task.className}
+            <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${classStyles[taskClass]}`}>
+              {CLASS_META[taskClass].emoji} {taskClass}
             </span>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">{task.status}</span>
           </div>
@@ -605,7 +583,7 @@ function IconButton({ onClick, title, label, children }: { onClick: () => void; 
   );
 }
 
-function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: string; at: string; xpAwarded: number; classXpAwarded: number; progressCount: number; skillCheck?: { success: boolean; critical: boolean; skillName: string; className: ClassName } }>; task?: QuestTask }) {
+function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: string; at: string; xpAwarded: number; classXpAwarded: number; progressCount: number; skillCheck?: { success: boolean; critical: boolean; skillName: string; className: ClassName; classLevel?: number; advantageTriggered?: boolean; scrollCount?: number }; scrollEarned?: string; scrollCount?: number }>; task?: QuestTask }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -630,8 +608,14 @@ function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: stri
                 <div className="mt-1 flex items-center gap-1 text-xs">
                   <span>🎲</span>
                   <span className={log.skillCheck.success ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>
-                    {log.skillCheck.skillName} {log.skillCheck.critical ? "Critical!" : log.skillCheck.success ? "Success" : "Fail"}
+                    Lv{log.skillCheck.classLevel ?? 1} {log.skillCheck.skillName} {log.skillCheck.critical ? "Critical!" : log.skillCheck.success ? "Success" : "Fail"}
+                    {log.skillCheck.advantageTriggered ? " · 等级优势" : ""}
                   </span>
+                </div>
+              )}
+              {log.scrollEarned && (
+                <div className="mt-1 text-xs font-semibold text-amber-700">
+                  📜 {log.scrollEarned}{log.scrollCount && log.scrollCount > 1 ? ` x${log.scrollCount}` : ""}
                 </div>
               )}
               <p className="mt-2 break-words text-sm font-medium text-slate-900">{log.note}</p>

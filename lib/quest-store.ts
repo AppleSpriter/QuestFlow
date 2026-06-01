@@ -40,6 +40,7 @@ export type ProgressLog = {
   progressCount: number;
   skillCheck?: SkillCheckResult;
   scrollEarned?: string;
+  scrollCount?: number;
   newSkill?: string;
   skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
 };
@@ -57,14 +58,32 @@ export type ProgressResult = {
   firstOfDay: boolean;
   skillCheck?: SkillCheckResult;
   scrollEarned?: string;
+  scrollCount?: number;
   newSkill?: string;
   skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
   at: string;
 };
 
-type StreakState = {
+export type StreakState = {
   count: number;
   lastProgressDate?: string;
+};
+
+export type QuestBackup = {
+  app: "questflow";
+  version: number;
+  exportedAt: string;
+  updatedAt: string;
+  tasks: QuestTask[];
+  logs: ProgressLog[];
+  focusTaskId?: string;
+  totalXp: number;
+  streak: StreakState;
+  momentumTaskId?: string;
+  momentumCount: number;
+  classStates: Record<ClassName, ClassState>;
+  lastProgressDate?: string;
+  lastSyncedAt?: string;
 };
 
 type QuestStore = {
@@ -77,23 +96,59 @@ type QuestStore = {
   momentumCount: number;
   classStates: Record<ClassName, ClassState>;
   lastProgressDate?: string;
+  dataUpdatedAt?: string;
+  lastSyncedAt?: string;
   addTask: (title: string, className?: ClassName) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
   progressTask: (taskId: string, note?: string) => ProgressResult | null;
   useScroll: (className: ClassName) => { lineId: string; isNew: boolean; upgraded: boolean; fromTier: number; toTier: number } | null;
+  getBackupData: () => QuestBackup;
   exportData: () => void;
-  importData: (jsonString: string) => boolean;
+  importData: (jsonString: string, options?: { markSyncedAt?: string }) => boolean;
+  clearAll: () => void;
+  markSynced: (syncedAt: string) => void;
 };
 
 const milestones = new Set([5, 10, 25, 50]);
 const milestoneXpBonus: Record<number, number> = { 5: 25, 10: 50, 25: 75, 50: 100 };
+const classNames: ClassName[] = ["Wizard", "Fighter", "Rogue", "Bard", "Cleric"];
+
+const isClassName = (value: unknown): value is ClassName =>
+  typeof value === "string" && classNames.includes(value as ClassName);
 
 const makeId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const normalizeTasks = (tasks: unknown): QuestTask[] => {
+  if (!Array.isArray(tasks)) return [];
+
+  return tasks.map((task) => {
+    const item = task as Partial<QuestTask>;
+    const now = new Date().toISOString();
+    const createdAt = typeof item.createdAt === "string" ? item.createdAt : now;
+    const updatedAt =
+      typeof item.updatedAt === "string"
+        ? item.updatedAt
+        : typeof item.lastFocusedAt === "string"
+          ? item.lastFocusedAt
+          : createdAt;
+
+    return {
+      id: typeof item.id === "string" ? item.id : makeId(),
+      title: typeof item.title === "string" ? item.title : "Untitled Quest",
+      progressCount: typeof item.progressCount === "number" ? item.progressCount : 0,
+      status: item.status === "paused" || item.status === "archived" ? item.status : "active",
+      className: isClassName(item.className) ? item.className : "Wizard",
+      createdAt,
+      updatedAt,
+      lastFocusedAt: typeof item.lastFocusedAt === "string" ? item.lastFocusedAt : undefined
+    };
+  });
 };
 
 const getLocalDayKey = (date: Date) => {
@@ -131,6 +186,56 @@ export const getLevelProgress = (xp: number) => {
   };
 };
 
+const getDerivedUpdatedAt = (
+  state: Pick<QuestStore, "dataUpdatedAt" | "tasks" | "logs">
+) => {
+  const candidates = [
+    state.dataUpdatedAt,
+    ...state.tasks.map((task) => task.updatedAt),
+    ...state.logs.map((log) => log.at)
+  ].filter(Boolean) as string[];
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  return candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+};
+
+const createBackupData = (state: QuestStore): QuestBackup => {
+  const exportedAt = new Date().toISOString();
+
+  return {
+    app: "questflow",
+    version: 6,
+    exportedAt,
+    updatedAt: getDerivedUpdatedAt(state) ?? exportedAt,
+    tasks: state.tasks,
+    logs: state.logs,
+    focusTaskId: state.focusTaskId,
+    totalXp: state.totalXp,
+    streak: state.streak,
+    momentumTaskId: state.momentumTaskId,
+    momentumCount: state.momentumCount,
+    classStates: state.classStates,
+    lastProgressDate: state.lastProgressDate,
+    lastSyncedAt: state.lastSyncedAt
+  };
+};
+
+const downloadBackup = (data: QuestBackup) => {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "questflow-backup.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
 export const useQuestStore = create<QuestStore>()(
   persist(
     (set, get) => ({
@@ -143,6 +248,8 @@ export const useQuestStore = create<QuestStore>()(
       momentumCount: 0,
       classStates: initClassState(),
       lastProgressDate: undefined,
+      dataUpdatedAt: undefined,
+      lastSyncedAt: undefined,
 
       addTask: (rawTitle, className: ClassName = "Wizard") => {
         const title = rawTitle.trim();
@@ -160,7 +267,8 @@ export const useQuestStore = create<QuestStore>()(
         };
         set((state) => ({
           tasks: [task, ...state.tasks],
-          focusTaskId: state.focusTaskId ?? task.id
+          focusTaskId: state.focusTaskId ?? task.id,
+          dataUpdatedAt: now
         }));
         return task.id;
       },
@@ -171,7 +279,8 @@ export const useQuestStore = create<QuestStore>()(
           focusTaskId: taskId,
           tasks: state.tasks.map((task) =>
             task.id === taskId ? { ...task, lastFocusedAt: now } : task
-          )
+          ),
+          dataUpdatedAt: now
         }));
       },
 
@@ -185,7 +294,7 @@ export const useQuestStore = create<QuestStore>()(
             state.focusTaskId === taskId && status === "archived"
               ? nextTasks.find((task) => task.status === "active")?.id
               : state.focusTaskId;
-          return { tasks: nextTasks, focusTaskId: nextFocus };
+          return { tasks: nextTasks, focusTaskId: nextFocus, dataUpdatedAt: now };
         });
       },
 
@@ -197,6 +306,7 @@ export const useQuestStore = create<QuestStore>()(
         const now = new Date();
         const at = now.toISOString();
         const progressCount = task.progressCount + 1;
+        const taskClassName = isClassName(task.className) ? task.className : "Wizard";
 
         // XP
         const momentum =
@@ -214,13 +324,13 @@ export const useQuestStore = create<QuestStore>()(
         let skillCheck: SkillCheckResult | undefined;
         const triggerCheck = Math.random() < 0.5;
         if (triggerCheck) {
-          const classLevel = getClassLevel(state.classStates[task.className].xp);
-          skillCheck = rollSkillCheck(task.className, classLevel);
+          const classLevel = getClassLevel(state.classStates[taskClassName].xp);
+          skillCheck = rollSkillCheck(taskClassName, classLevel);
           classXpAwarded += skillCheck.xpBonus;
 
           // Scroll on critical
           if (skillCheck.scrollEarned) {
-            scrollsAwarded = 1;
+            scrollsAwarded = skillCheck.scrollCount;
           }
         }
 
@@ -243,15 +353,16 @@ export const useQuestStore = create<QuestStore>()(
           classXpAwarded,
           progressCount,
           skillCheck,
-          scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined
+          scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined,
+          scrollCount: skillCheck?.scrollCount
         };
 
         // Update class XP and scrolls
         const updatedClassStates = { ...state.classStates };
-        updatedClassStates[task.className] = {
-          ...updatedClassStates[task.className],
-          xp: updatedClassStates[task.className].xp + classXpAwarded,
-          scrolls: updatedClassStates[task.className].scrolls + scrollsAwarded
+        updatedClassStates[taskClassName] = {
+          ...updatedClassStates[taskClassName],
+          xp: updatedClassStates[taskClassName].xp + classXpAwarded,
+          scrolls: updatedClassStates[taskClassName].scrolls + scrollsAwarded
         };
 
         set({
@@ -259,6 +370,7 @@ export const useQuestStore = create<QuestStore>()(
             item.id === taskId
               ? {
                   ...item,
+                  className: taskClassName,
                   status: item.status === "paused" ? "active" : item.status,
                   progressCount,
                   updatedAt: at
@@ -272,7 +384,8 @@ export const useQuestStore = create<QuestStore>()(
           momentumTaskId: taskId,
           momentumCount: momentum,
           classStates: updatedClassStates,
-          lastProgressDate: firstOfDay ? today : state.lastProgressDate
+          lastProgressDate: firstOfDay ? today : state.lastProgressDate,
+          dataUpdatedAt: at
         });
 
         return {
@@ -288,6 +401,7 @@ export const useQuestStore = create<QuestStore>()(
           firstOfDay,
           skillCheck,
           scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined,
+          scrollCount: skillCheck?.scrollCount,
           at
         };
       },
@@ -323,45 +437,27 @@ export const useQuestStore = create<QuestStore>()(
           classStates: {
             ...state.classStates,
             [className]: { ...cs, scrolls: cs.scrolls - 1, skills: updatedSkills }
-          }
+          },
+          dataUpdatedAt: new Date().toISOString()
         });
 
         return result;
       },
 
+      getBackupData: () => createBackupData(get()),
+
       exportData: () => {
-        const state = get();
-        const data = {
-          version: 3,
-          exportedAt: new Date().toISOString(),
-          tasks: state.tasks,
-          logs: state.logs,
-          focusTaskId: state.focusTaskId,
-          totalXp: state.totalXp,
-          streak: state.streak,
-          momentumTaskId: state.momentumTaskId,
-          momentumCount: state.momentumCount,
-          classStates: state.classStates,
-          lastProgressDate: state.lastProgressDate
-        };
-        const json = JSON.stringify(data, null, 2);
-        const blob = new Blob([json], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "questflow-backup.json";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        downloadBackup(createBackupData(get()));
       },
 
-      importData: (jsonString: string): boolean => {
+      importData: (jsonString: string, options): boolean => {
         try {
           const data = JSON.parse(jsonString);
           if (!data.tasks) return false;
+          const now = new Date().toISOString();
+          const importedUpdatedAt = data.updatedAt ?? data.exportedAt ?? now;
           set({
-            tasks: data.tasks ?? [],
+            tasks: normalizeTasks(data.tasks),
             logs: data.logs ?? [],
             focusTaskId: data.focusTaskId,
             totalXp: data.totalXp ?? 0,
@@ -369,18 +465,41 @@ export const useQuestStore = create<QuestStore>()(
             momentumTaskId: data.momentumTaskId,
             momentumCount: data.momentumCount ?? 0,
             classStates: data.classStates ?? initClassState(),
-            lastProgressDate: data.lastProgressDate
+            lastProgressDate: data.lastProgressDate,
+            dataUpdatedAt: importedUpdatedAt,
+            lastSyncedAt: options?.markSyncedAt ?? data.lastSyncedAt
           });
           return true;
         } catch {
           return false;
         }
+      },
+
+      clearAll: () => {
+        const now = new Date().toISOString();
+        set({
+          tasks: [],
+          logs: [],
+          focusTaskId: undefined,
+          totalXp: 0,
+          streak: { count: 0 },
+          momentumTaskId: undefined,
+          momentumCount: 0,
+          classStates: initClassState(),
+          lastProgressDate: undefined,
+          dataUpdatedAt: now,
+          lastSyncedAt: undefined
+        });
+      },
+
+      markSynced: (syncedAt) => {
+        set({ lastSyncedAt: syncedAt });
       }
     }),
     {
       name: "questflow-v1",
       storage: createJSONStorage(() => localStorage),
-      version: 5,
+      version: 6,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;
         let data = persisted;
@@ -411,6 +530,25 @@ export const useQuestStore = create<QuestStore>()(
           for (const key of Object.keys(cs)) {
             cs[key].skills = [];
           }
+        }
+
+        // v5→v6: add sync timestamps for WebDAV conflict detection
+        if (version < 6) {
+          const tasks = (data.tasks as Array<{ updatedAt?: string }> | undefined) ?? [];
+          const logs = (data.logs as Array<{ at?: string }> | undefined) ?? [];
+          const candidates = [
+            data.dataUpdatedAt as string | undefined,
+            ...tasks.map((task) => task.updatedAt),
+            ...logs.map((log) => log.at)
+          ].filter(Boolean) as string[];
+          data = {
+            ...data,
+            tasks: normalizeTasks(data.tasks),
+            dataUpdatedAt:
+              candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ??
+              undefined,
+            lastSyncedAt: data.lastSyncedAt
+          };
         }
 
         return data;

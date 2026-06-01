@@ -23,14 +23,19 @@ export type ClassState = {
 export type SkillCheckResult = {
   skillName: string;
   className: ClassName;
+  classLevel: number;
   dc: number;
   roll: number;
+  naturalRolls: number[];
+  advantageTriggered: boolean;
   modifier: number;
   success: boolean;
   critical: boolean;
   xpBonus: number;
   scrollEarned: boolean;
   scrollType: string;
+  scrollCount: number;
+  bonusScrollChance: number;
 };
 
 // ─── Class metadata ────────────────────────────────────────────────
@@ -193,6 +198,57 @@ export function getClassLevel(xp: number): number {
   return Math.floor(xp / 100) + 1;
 }
 
+function rollWeightedD20(classLevel: number): {
+  roll: number;
+  naturalRolls: number[];
+  advantageTriggered: boolean;
+} {
+  const first = Math.floor(Math.random() * 20) + 1;
+  const advantageChance = Math.min(0.7, Math.max(0, classLevel - 1) * 0.02);
+
+  if (Math.random() >= advantageChance) {
+    return {
+      roll: first,
+      naturalRolls: [first],
+      advantageTriggered: false
+    };
+  }
+
+  const second = Math.floor(Math.random() * 20) + 1;
+
+  return {
+    roll: Math.max(first, second),
+    naturalRolls: [first, second],
+    advantageTriggered: true
+  };
+}
+
+function getScrollRewardCount(classLevel: number, critical: boolean): {
+  scrollCount: number;
+  bonusScrollChance: number;
+} {
+  if (!critical) {
+    return {
+      scrollCount: 0,
+      bonusScrollChance: 0
+    };
+  }
+
+  if (classLevel <= 1) {
+    return {
+      scrollCount: 1,
+      bonusScrollChance: 0
+    };
+  }
+
+  const bonusScrollChance = Math.min(50, classLevel);
+
+  return {
+    scrollCount: Math.random() * 100 < bonusScrollChance ? 2 : 1,
+    bonusScrollChance
+  };
+}
+
 export function getClassLines(className: ClassName): SkillLine[] {
   return SKILL_LINES.filter((l) => l.class === className);
 }
@@ -216,25 +272,31 @@ export function rollSkillCheck(className: ClassName, classLevel: number): SkillC
   const meta = CLASS_META[className];
   const skillName = meta.checkSkills[Math.floor(Math.random() * meta.checkSkills.length)];
   const dc = 10 + Math.floor(Math.random() * 6);
-  const roll = Math.floor(Math.random() * 20) + 1;
+  const { roll, naturalRolls, advantageTriggered } = rollWeightedD20(classLevel);
   const modifier = Math.floor(classLevel / 2);
   const total = roll + modifier;
   const critical = roll === 20;
   const success = critical || total >= dc;
   const xpBonus = critical ? 10 : success ? 5 : 0;
   const scrollEarned = critical;
+  const { scrollCount, bonusScrollChance } = getScrollRewardCount(classLevel, critical);
 
   return {
     skillName,
     className,
+    classLevel,
     dc,
     roll,
+    naturalRolls,
+    advantageTriggered,
     modifier,
     success,
     critical,
     xpBonus,
     scrollEarned,
-    scrollType: meta.scrollName
+    scrollType: meta.scrollName,
+    scrollCount,
+    bonusScrollChance
   };
 }
 
