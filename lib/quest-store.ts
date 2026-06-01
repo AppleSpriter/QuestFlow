@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 export type QuestStatus = "active" | "paused" | "archived";
-export type AgentName = "Codex" | "Claude Code" | "Cursor Agent" | "Gemini" | "None";
+export type AgentName = "Codex" | "openclaw" | "Claude Code" | "Gemini" | "dodo" | "None";
 
 export type QuestTask = {
   id: string;
@@ -127,7 +127,7 @@ export const useQuestStore = create<QuestStore>()(
       },
       momentumTaskId: undefined,
       momentumCount: 0,
-      addTask: (rawTitle, agent = "Codex") => {
+      addTask: (rawTitle, agent = "openclaw") => {
         const title = rawTitle.trim();
 
         if (!title) {

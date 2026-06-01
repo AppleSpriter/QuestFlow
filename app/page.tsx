@@ -25,7 +25,7 @@ import {
   useQuestStore
 } from "@/lib/quest-store";
 
-const agents: AgentName[] = ["Codex", "Claude Code", "Cursor Agent", "Gemini", "None"];
+const agents: AgentName[] = ["Codex", "openclaw", "Claude Code", "Gemini", "dodo", "None"];
 
 const statusTabs: Array<{ id: QuestStatus; label: string }> = [
   { id: "active", label: "Active" },
@@ -35,9 +35,10 @@ const statusTabs: Array<{ id: QuestStatus; label: string }> = [
 
 const agentStyles: Record<AgentName, string> = {
   Codex: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  openclaw: "border-violet-200 bg-violet-50 text-violet-800",
   "Claude Code": "border-amber-200 bg-amber-50 text-amber-800",
-  "Cursor Agent": "border-sky-200 bg-sky-50 text-sky-800",
   Gemini: "border-rose-200 bg-rose-50 text-rose-800",
+  dodo: "border-teal-200 bg-teal-50 text-teal-800",
   None: "border-slate-200 bg-slate-50 text-slate-700"
 };
 
@@ -84,7 +85,7 @@ export default function QuestFlowPage() {
 
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
-  const [agent, setAgent] = useState<AgentName>("Codex");
+  const [agent, setAgent] = useState<AgentName>("openclaw");
   const [statusFilter, setStatusFilter] = useState<QuestStatus>("active");
   const [progressNote, setProgressNote] = useState("");
   const [lastProgress, setLastProgress] = useState<ProgressResult | null>(null);
@@ -219,51 +220,55 @@ export default function QuestFlowPage() {
 
       <form
         onSubmit={submitTask}
-        className="mb-5 grid gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm sm:grid-cols-[1fr_190px_auto]"
+        className="mb-5 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
       >
         <label className="sr-only" htmlFor="quest-title">
           新建任务
         </label>
         <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3">
           <Plus size={17} className="shrink-0 text-slate-500" />
-          <input
+          <textarea
             id="quest-title"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
                 createQuest();
               }
             }}
-            placeholder="新增 Quest，按 Enter 创建"
-            className="focus-ring min-h-11 w-full bg-transparent text-sm text-slate-950 placeholder:text-slate-400"
+            placeholder="新增 Quest，⌘+Enter 创建"
+            rows={1}
+            className="focus-ring min-h-11 w-full resize-none bg-transparent text-sm text-slate-950 placeholder:text-slate-400"
           />
         </div>
-        <label className="sr-only" htmlFor="agent">
-          Agent
-        </label>
-        <select
-          id="agent"
-          value={agent}
-          onChange={(event) => setAgent(event.target.value as AgentName)}
-          className="focus-ring min-h-11 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-700"
-        >
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-500">Agent</span>
           {agents.map((item) => (
-            <option key={item} value={item}>
+            <button
+              key={item}
+              type="button"
+              onClick={() => setAgent(item)}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                agent === item
+                  ? agentStyles[item]
+                  : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+              }`}
+            >
               {item === "None" ? "No Agent" : item}
-            </option>
+            </button>
           ))}
-        </select>
-        <button
-          type="submit"
-          className="focus-ring inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={!title.trim()}
-          title="Create quest"
-        >
-          <Plus size={17} />
-          Create
-        </button>
+          <div className="flex-1" />
+          <button
+            type="submit"
+            className="focus-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!title.trim()}
+            title="Create quest"
+          >
+            <Plus size={17} />
+            Create
+          </button>
+        </div>
       </form>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_390px]">
@@ -419,16 +424,17 @@ function FocusPanel({
             </div>
 
             <div className="mt-5 grid gap-2 sm:grid-cols-[1fr_auto]">
-              <input
+              <textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                     onProgress();
                   }
                 }}
-                placeholder="备注这一步推进了什么"
-                className="focus-ring min-h-12 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 placeholder:text-slate-400"
+                placeholder="备注这一步推进了什么，⌘+Enter 提交"
+                rows={2}
+                className="focus-ring min-h-12 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-950 placeholder:text-slate-400"
               />
               <button
                 type="button"
@@ -461,47 +467,115 @@ function FocusPanel({
 }
 
 function ProgressBurst({ result }: { result: ProgressResult }) {
-  const colors = ["#22c55e", "#0ea5e9", "#f59e0b", "#fb7185"];
+  const colors = ["#22c55e", "#0ea5e9", "#f59e0b", "#fb7185", "#a78bfa", "#14b8a6"];
+  const particleTypes = ["particle", "particle-star", "particle-diamond", "particle-ring"] as const;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
-      <motion.div
-        initial={{ opacity: 0, y: 18, scale: 0.96 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -18, scale: 0.96 }}
-        transition={{ duration: 0.22 }}
-        className="absolute right-4 top-4 rounded-lg border border-emerald-200 bg-white px-4 py-3 shadow-lift"
-      >
-        <div className="text-sm font-semibold text-emerald-700">+1 Progress</div>
-        <div className="mt-1 text-xs font-medium text-slate-500">+{result.xpAwarded} XP</div>
-        {result.momentum >= 2 ? (
-          <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-            <Flame size={12} />
-            Momentum x{result.momentum}
-          </div>
-        ) : null}
-      </motion.div>
+      {/* Glowing background burst */}
+      {Array.from({ length: 3 }).map((_, i) => (
+        <motion.div
+          key={`glow-${i}`}
+          className="glow-burst"
+          style={{ "--particle-color": colors[i % colors.length] } as CSSProperties}
+          initial={{ left: "68%", top: "62%", width: 0, height: 0, opacity: 0.6 }}
+          animate={{
+            width: [0, 120 + i * 40],
+            height: [0, 120 + i * 40],
+            opacity: [0.6, 0],
+            x: [0, -(60 + i * 20)],
+            y: [0, -(60 + i * 20)]
+          }}
+          transition={{ duration: 0.7, ease: "easeOut", delay: i * 0.08 }}
+        />
+      ))}
 
-      {Array.from({ length: 18 }).map((_, index) => {
-        const angle = (Math.PI * 2 * index) / 18;
-        const distance = 58 + (index % 5) * 10;
+      {/* Fast outer ring of particles */}
+      {Array.from({ length: 24 }).map((_, index) => {
+        const angle = (Math.PI * 2 * index) / 24 + (index % 2 === 0 ? 0.15 : -0.15);
+        const distance = 75 + (index % 6) * 14;
+        const type = particleTypes[index % particleTypes.length];
 
         return (
           <motion.span
-            key={index}
-            className="particle"
+            key={`outer-${index}`}
+            className={type}
             style={{ "--particle-color": colors[index % colors.length] } as CSSProperties}
-            initial={{ left: "68%", top: "62%", opacity: 1, scale: 0.4, x: 0, y: 0 }}
+            initial={{ left: "68%", top: "62%", opacity: 1, scale: 0.3, x: 0, y: 0 }}
             animate={{
               opacity: 0,
-              scale: 1.2,
+              scale: [0.3, 1.4, 0.8],
               x: Math.cos(angle) * distance,
-              y: Math.sin(angle) * distance
+              y: Math.sin(angle) * distance,
+              rotate: [0, 180 + index * 15]
             }}
-            transition={{ duration: 0.78, ease: "easeOut" }}
+            transition={{ duration: 0.9, ease: "easeOut" }}
           />
         );
       })}
+
+      {/* Slow inner sparkles */}
+      {Array.from({ length: 12 }).map((_, index) => {
+        const angle = (Math.PI * 2 * index) / 12 + 0.3;
+        const distance = 35 + (index % 3) * 12;
+
+        return (
+          <motion.span
+            key={`inner-${index}`}
+            className="particle-star"
+            style={{ "--particle-color": colors[(index + 2) % colors.length] } as CSSProperties}
+            initial={{ left: "68%", top: "62%", opacity: 1, scale: 0, x: 0, y: 0 }}
+            animate={{
+              opacity: [1, 1, 0],
+              scale: [0, 1.6, 0.4],
+              x: Math.cos(angle) * distance,
+              y: Math.sin(angle) * distance,
+              rotate: [0, 360]
+            }}
+            transition={{ duration: 1.1, ease: "easeOut", delay: 0.05 }}
+          />
+        );
+      })}
+
+      {/* Rising sparkles */}
+      {Array.from({ length: 6 }).map((_, index) => (
+        <motion.span
+          key={`rise-${index}`}
+          className="particle-diamond"
+          style={{ "--particle-color": colors[(index + 4) % colors.length] } as CSSProperties}
+          initial={{ left: `${58 + index * 4}%`, top: "58%", opacity: 1, scale: 0.5, y: 0 }}
+          animate={{
+            opacity: 0,
+            scale: [0.5, 1.8, 0.3],
+            y: [0, -80 - index * 10],
+            rotate: [0, index % 2 === 0 ? 180 : -180]
+          }}
+          transition={{ duration: 1.2, ease: "easeOut", delay: index * 0.04 }}
+        />
+      ))}
+
+      {/* Result card with bounce */}
+      <motion.div
+        initial={{ opacity: 0, y: 18, scale: 0.8, rotate: -3 }}
+        animate={{ opacity: 1, y: 0, scale: [0.8, 1.12, 0.96, 1], rotate: [-3, 1, 0] }}
+        exit={{ opacity: 0, y: -18, scale: 0.96 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className="absolute right-4 top-4 rounded-xl border border-emerald-200 bg-white px-5 py-4 shadow-lift"
+      >
+        <div className="text-base font-bold text-emerald-700">+1 Progress</div>
+        <div className="mt-1 text-sm font-semibold text-slate-600">+{result.xpAwarded} XP</div>
+        {result.momentum >= 2 ? (
+          <motion.div
+            initial={{ scale: 0.8 }}
+            animate={{ scale: [0.8, 1.2, 1] }}
+            transition={{ duration: 0.35 }}
+            className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800"
+          >
+            <Flame size={12} />
+            Momentum x{result.momentum}
+          </motion.div>
+        ) : null}
+      </motion.div>
     </div>
   );
 }
@@ -719,6 +793,8 @@ function FocusChangedOverlay() {
 }
 
 function MilestoneOverlay({ result }: { result: ProgressResult }) {
+  const colors = ["#f59e0b", "#fb7185", "#a78bfa", "#22c55e", "#0ea5e9", "#14b8a6"];
+
   return (
     <motion.div
       className="pointer-events-none fixed inset-0 z-50 grid place-items-center bg-slate-950/10 px-4"
@@ -727,18 +803,47 @@ function MilestoneOverlay({ result }: { result: ProgressResult }) {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.16 }}
     >
+      {/* Milestone fireworks */}
+      {Array.from({ length: 30 }).map((_, index) => {
+        const angle = (Math.PI * 2 * index) / 30;
+        const distance = 100 + (index % 5) * 30;
+        const shapes = ["particle", "particle-star", "particle-diamond"] as const;
+
+        return (
+          <motion.span
+            key={`firework-${index}`}
+            className={shapes[index % shapes.length]}
+            style={{ "--particle-color": colors[index % colors.length] } as CSSProperties}
+            initial={{ left: "50%", top: "50%", opacity: 1, scale: 0.2, x: 0, y: 0 }}
+            animate={{
+              opacity: 0,
+              scale: [0.2, 1.6, 0.5],
+              x: Math.cos(angle) * distance,
+              y: Math.sin(angle) * distance,
+              rotate: [0, 360]
+            }}
+            transition={{ duration: 1.3, ease: "easeOut" }}
+          />
+        );
+      })}
+
       <motion.div
-        className="rounded-lg border border-amber-200 bg-white px-6 py-5 text-center shadow-lift"
-        initial={{ scale: 0.78, y: 24 }}
-        animate={{ scale: [0.78, 1.08, 1], y: 0 }}
+        className="rounded-2xl border-2 border-amber-200 bg-white px-8 py-6 text-center shadow-lift"
+        initial={{ scale: 0.5, y: 30, rotate: -5 }}
+        animate={{ scale: [0.5, 1.15, 0.95, 1], y: 0, rotate: [-5, 2, 0] }}
         exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ duration: 0.46, ease: "easeOut" }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
       >
-        <Trophy className="mx-auto text-amber-500" size={34} />
-        <div className="mt-3 text-xl font-semibold text-slate-950">
+        <motion.div
+          animate={{ rotate: [0, -10, 10, -5, 0], scale: [1, 1.2, 1] }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+        >
+          <Trophy className="mx-auto text-amber-500" size={42} />
+        </motion.div>
+        <div className="mt-3 text-2xl font-bold text-slate-950">
           已推进 {result.milestone} 次
         </div>
-        <div className="mt-1 text-sm font-medium text-slate-500">Milestone +50 XP</div>
+        <div className="mt-2 text-base font-semibold text-amber-600">Milestone +50 XP</div>
       </motion.div>
     </motion.div>
   );
