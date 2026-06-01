@@ -113,7 +113,7 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
                 className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800"
               >
                 📜 {info.scrollEarned}
-                {info.scrollCount && info.scrollCount > 1 ? ` x${info.scrollCount}` : ""}
+                {info.scrollCount && info.scrollCount > 1 ? ` x${info.scrollCount}（大成功双倍）` : " x1"}
               </motion.div>
             )}
 

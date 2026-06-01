@@ -223,30 +223,21 @@ function rollWeightedD20(classLevel: number): {
   };
 }
 
-function getScrollRewardCount(classLevel: number, critical: boolean): {
+function getScrollRewardCount(classLevel: number, success: boolean, critical: boolean): {
   scrollCount: number;
   bonusScrollChance: number;
 } {
-  if (!critical) {
-    return {
-      scrollCount: 0,
-      bonusScrollChance: 0
-    };
+  if (!success) {
+    return { scrollCount: 0, bonusScrollChance: 0 };
   }
 
-  if (classLevel <= 1) {
-    return {
-      scrollCount: 1,
-      bonusScrollChance: 0
-    };
+  if (critical) {
+    // 大成功：双倍卷轴
+    return { scrollCount: 2, bonusScrollChance: 100 };
   }
 
-  const bonusScrollChance = Math.min(50, classLevel);
-
-  return {
-    scrollCount: Math.random() * 100 < bonusScrollChance ? 2 : 1,
-    bonusScrollChance
-  };
+  // 普通成功：1 个卷轴
+  return { scrollCount: 1, bonusScrollChance: 0 };
 }
 
 export function getClassLines(className: ClassName): SkillLine[] {
@@ -278,8 +269,8 @@ export function rollSkillCheck(className: ClassName, classLevel: number): SkillC
   const critical = roll === 20;
   const success = critical || total >= dc;
   const xpBonus = critical ? 10 : success ? 5 : 0;
-  const scrollEarned = critical;
-  const { scrollCount, bonusScrollChance } = getScrollRewardCount(classLevel, critical);
+  const scrollEarned = success;
+  const { scrollCount, bonusScrollChance } = getScrollRewardCount(classLevel, success, critical);
 
   return {
     skillName,

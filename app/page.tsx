@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Archive,
@@ -12,7 +13,6 @@ import {
   Play,
   Plus,
   RotateCcw,
-  Sparkles,
   Target,
   Trophy,
   Zap
@@ -193,10 +193,15 @@ export default function QuestFlowPage() {
       <header className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-950 text-white">
-              <Sparkles size={18} strokeWidth={2.2} />
-            </span>
-            <h1 className="text-2xl font-semibold text-slate-950">QuestFlow</h1>
+            <Image
+              src="/logo2.png"
+              alt="QuestFlow logo"
+              width={96}
+              height={96}
+              priority
+              className="h-24 w-24 rounded-2xl object-cover shadow-sm"
+            />
+            <h1 className="text-3xl font-semibold text-slate-950">QuestFlow</h1>
           </div>
           <p className="mt-1 text-sm text-slate-500">DnD Progress Tracker for agent-heavy work</p>
         </div>
@@ -222,19 +227,38 @@ export default function QuestFlowPage() {
       </header>
 
       {/* Class Builds summary */}
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         {ALL_CLASSES.map((cn) => {
           const meta = CLASS_META[cn];
           const cs = classStates[cn];
           const lvl = getClassLevel(cs.xp);
+          const currentXp = cs.xp % 100;
+          const xpPercent = Math.min(100, currentXp);
           const scrollCount = cs.scrolls;
           const skillCount = cs.skills.length;
           return (
-            <div key={cn} className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold ${classStyles[cn]}`}>
-              <span>{meta.emoji}</span>
-              <span>{cn} Lv{lvl}</span>
-              {scrollCount > 0 && <span className="opacity-70">📜{scrollCount}</span>}
-              {skillCount > 0 && <span className="opacity-70">✨{skillCount}</span>}
+            <div key={cn} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${classStyles[cn]}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span>{meta.emoji}</span>
+                  <span className="truncate">{cn} Lv{lvl}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1 opacity-70">
+                  {scrollCount > 0 && <span>📜{scrollCount}</span>}
+                  {skillCount > 0 && <span>✨{skillCount}</span>}
+                </div>
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
+                  <motion.div
+                    className="h-full rounded-full bg-current opacity-70"
+                    initial={false}
+                    animate={{ width: `${xpPercent}%` }}
+                    transition={{ duration: 0.45, ease: "easeOut" }}
+                  />
+                </div>
+                <span className="shrink-0 text-[10px] opacity-70">{currentXp}/100</span>
+              </div>
             </div>
           );
         })}
@@ -583,7 +607,7 @@ function IconButton({ onClick, title, label, children }: { onClick: () => void; 
   );
 }
 
-function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: string; at: string; xpAwarded: number; classXpAwarded: number; progressCount: number; skillCheck?: { success: boolean; critical: boolean; skillName: string; className: ClassName; classLevel?: number; advantageTriggered?: boolean; scrollCount?: number }; scrollEarned?: string; scrollCount?: number }>; task?: QuestTask }) {
+function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: string; at: string; xpAwarded: number; classXpAwarded: number; progressCount: number; skillCheck?: { success: boolean; critical: boolean; skillName: string; className: ClassName; classLevel?: number; dc: number; roll: number; modifier: number; advantageTriggered?: boolean; naturalRolls?: number[]; scrollCount?: number }; scrollEarned?: string; scrollCount?: number }>; task?: QuestTask }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -608,8 +632,9 @@ function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: stri
                 <div className="mt-1 flex items-center gap-1 text-xs">
                   <span>🎲</span>
                   <span className={log.skillCheck.success ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>
-                    Lv{log.skillCheck.classLevel ?? 1} {log.skillCheck.skillName} {log.skillCheck.critical ? "Critical!" : log.skillCheck.success ? "Success" : "Fail"}
-                    {log.skillCheck.advantageTriggered ? " · 等级优势" : ""}
+                    Lv{log.skillCheck.classLevel ?? 1} {log.skillCheck.skillName} {log.skillCheck.critical ? "大成功" : log.skillCheck.success ? "成功" : "失败"}
+                    {` · DC ${log.skillCheck.dc} · 投骰 ${log.skillCheck.roll}+${log.skillCheck.modifier}=${log.skillCheck.roll + log.skillCheck.modifier}`}
+                    {log.skillCheck.advantageTriggered ? ` · 等级优势(${log.skillCheck.naturalRolls?.join("/") ?? log.skillCheck.roll})` : ""}
                   </span>
                 </div>
               )}

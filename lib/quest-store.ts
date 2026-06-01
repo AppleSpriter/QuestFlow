@@ -328,7 +328,7 @@ export const useQuestStore = create<QuestStore>()(
           skillCheck = rollSkillCheck(taskClassName, classLevel);
           classXpAwarded += skillCheck.xpBonus;
 
-          // Scroll on critical
+          // Scroll on success (1 for success, 2 for critical)
           if (skillCheck.scrollEarned) {
             scrollsAwarded = skillCheck.scrollCount;
           }
