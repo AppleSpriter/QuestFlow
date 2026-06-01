@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --ink: #101218;
+  --muted: #667085;
+  --paper: #f6f7f9;
+  --panel: #ffffff;
+  --line: #dde3eb;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --sky: #0ea5e9;
+  --rose: #fb7185;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--paper);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--ink);
+  background: linear-gradient(180deg, #fbfcfd 0%, #f1f4f7 100%);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  letter-spacing: 0;
+}
+
+::selection {
+  color: #07110b;
+  background: rgba(34, 197, 94, 0.28);
+}
+
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.22);
+}
+
+.particle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--particle-color, #22c55e);
+  pointer-events: none;
+}
