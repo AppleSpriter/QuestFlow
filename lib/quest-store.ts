@@ -96,6 +96,8 @@ type QuestStore = {
   setActiveCompanion: (companionId: string) => void;
   getCompanionLineForMood: (mood: CompanionMood) => string;
   isAllActiveProgressedToday: () => boolean;
+  exportData: () => void;
+  importData: (jsonString: string) => boolean;
 };
 
 const milestones = new Set([5, 10, 25, 50]);
@@ -373,6 +375,68 @@ export const useQuestStore = create<QuestStore>()(
         const activeTasks = state.tasks.filter((t) => t.status === "active");
         if (activeTasks.length === 0) return false;
         return activeTasks.every((t) => getLocalDayKey(new Date(t.updatedAt)) === today);
+      },
+
+      exportData: () => {
+        const state = get();
+        const data = {
+          version: 2,
+          exportedAt: new Date().toISOString(),
+          tasks: state.tasks,
+          logs: state.logs,
+          focusTaskId: state.focusTaskId,
+          xp: state.xp,
+          crystals: state.crystals,
+          streak: state.streak,
+          momentumTaskId: state.momentumTaskId,
+          momentumCount: state.momentumCount,
+          companions: state.companions,
+          activeCompanionId: state.activeCompanionId,
+          gachaHistory: state.gachaHistory,
+          lastProgressDate: state.lastProgressDate
+        };
+        const json = JSON.stringify(data, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "questflow-backup.json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      },
+
+      importData: (jsonString: string): boolean => {
+        try {
+          const data = JSON.parse(jsonString);
+          if (!data.version || !data.tasks) return false;
+          // v1 数据兼容
+          if (data.version === 1) {
+            data.crystals = 0;
+            data.companions = initCompanions();
+            data.activeCompanionId = undefined;
+            data.gachaHistory = [];
+            data.lastProgressDate = undefined;
+          }
+          set({
+            tasks: data.tasks ?? [],
+            logs: data.logs ?? [],
+            focusTaskId: data.focusTaskId,
+            xp: data.xp ?? 0,
+            crystals: data.crystals ?? 0,
+            streak: data.streak ?? { count: 0 },
+            momentumTaskId: data.momentumTaskId,
+            momentumCount: data.momentumCount ?? 0,
+            companions: data.companions ?? initCompanions(),
+            activeCompanionId: data.activeCompanionId,
+            gachaHistory: data.gachaHistory ?? [],
+            lastProgressDate: data.lastProgressDate
+          });
+          return true;
+        } catch {
+          return false;
+        }
       }
     }),
     {

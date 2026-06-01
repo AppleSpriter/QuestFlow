@@ -5,6 +5,7 @@ import {
   Archive,
   BookOpen,
   ChevronRight,
+  Download,
   Flame,
   Gem,
   Pause,
@@ -14,10 +15,11 @@ import {
   Sparkles,
   Target,
   Trophy,
+  Upload,
   Zap
 } from "lucide-react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type AgentName,
   getLevelProgress,
@@ -93,6 +95,8 @@ export default function QuestFlowPage() {
   const gachaSingle = useQuestStore((state) => state.gachaSingle);
   const gachaTen = useQuestStore((state) => state.gachaTen);
   const isAllActiveProgressedToday = useQuestStore((state) => state.isAllActiveProgressedToday);
+  const exportData = useQuestStore((state) => state.exportData);
+  const importData = useQuestStore((state) => state.importData);
 
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
@@ -107,6 +111,8 @@ export default function QuestFlowPage() {
   const [showGacha, setShowGacha] = useState(false);
   const [showCollection, setShowCollection] = useState(false);
   const [companionMood, setCompanionMood] = useState<CompanionMood>("idle");
+  const [importStatus, setImportStatus] = useState<"idle" | "success" | "error">("idle");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -199,6 +205,21 @@ export default function QuestFlowPage() {
     setProgressNote("");
   };
 
+  const handleImportFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      const ok = importData(text);
+      setImportStatus(ok ? "success" : "error");
+      setTimeout(() => setImportStatus("idle"), 2000);
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be re-selected
+    event.target.value = "";
+  };
+
   if (!mounted) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center justify-center px-4 text-sm text-slate-500">
@@ -258,8 +279,8 @@ export default function QuestFlowPage() {
         </section>
       </header>
 
-      {/* Action bar: Gacha + Collection */}
-      <div className="mb-3 flex gap-2">
+      {/* Action bar: Gacha + Collection + Import/Export */}
+      <div className="mb-3 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setShowGacha(true)}
@@ -276,6 +297,40 @@ export default function QuestFlowPage() {
           <BookOpen size={16} />
           伙伴图鉴
         </button>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={exportData}
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+        >
+          <Download size={16} />
+          导出
+        </button>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+        >
+          <Upload size={16} />
+          导入
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          onChange={handleImportFile}
+          className="hidden"
+        />
+        {importStatus === "success" && (
+          <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-600">
+            导入成功
+          </span>
+        )}
+        {importStatus === "error" && (
+          <span className="inline-flex items-center gap-1 text-sm font-medium text-red-600">
+            导入失败，文件格式错误
+          </span>
+        )}
       </div>
 
       {/* Create form */}
