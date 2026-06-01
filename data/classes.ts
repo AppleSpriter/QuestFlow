@@ -18,6 +18,7 @@ export type ClassState = {
   xp: number;
   scrolls: number;
   skills: OwnedSkill[];
+  fatigue: number; // 0~100
 };
 
 export type SkillCheckResult = {
@@ -192,6 +193,54 @@ export const SKILL_LINES: SkillLine[] = [
     skills: ["稳定术", "复苏", "死者复生", "复活术", "真正复活", "灵魂归来", "奇迹复生", "圣灵复活", "完全复活"] },
 ];
 
+// ─── Fatigue system ──────────────────────────────────────────────
+
+export type FatigueStage = "energized" | "light" | "tired" | "exhausted";
+
+export function getFatigueStage(fatigue: number): FatigueStage {
+  if (fatigue <= 30) return "energized";
+  if (fatigue <= 60) return "light";
+  if (fatigue <= 80) return "tired";
+  return "exhausted";
+}
+
+export function getFatigueMultiplier(fatigue: number): number {
+  if (fatigue <= 30) return 1.0;
+  if (fatigue <= 60) return 0.9;
+  if (fatigue <= 80) return 0.75;
+  return 0.5;
+}
+
+export const FATIGUE_STAGE_META: Record<FatigueStage, { label: string; emoji: string; color: string }> = {
+  energized: { label: "精力充沛", emoji: "🟢", color: "#10b981" },
+  light:     { label: "轻度疲劳", emoji: "🟡", color: "#eab308" },
+  tired:     { label: "疲劳", emoji: "🟠", color: "#f97316" },
+  exhausted: { label: "极度疲劳", emoji: "🔴", color: "#ef4444" }
+};
+
+export const FATIGUE_PER_PROGRESS = 5;
+export const SHORT_REST_MINUTES = 5;
+export const LONG_REST_MINUTES = 15;
+export const SHORT_REST_RECOVERY = 30; // -30% fatigue
+
+// ─── Task tags ────────────────────────────────────────────────
+
+export type TaskTag = "important" | "urgent";
+
+export function getTagBonus(tags: TaskTag[]): number {
+  const hasImportant = tags.includes("important");
+  const hasUrgent = tags.includes("urgent");
+  if (hasImportant && hasUrgent) return 5;
+  if (hasImportant) return 3;
+  if (hasUrgent) return 2;
+  return 0;
+}
+
+export const TAG_META: Record<TaskTag, { label: string; textColor: string; bgColor: string; borderColor: string }> = {
+  important: { label: "重要", textColor: "#1d4ed8", bgColor: "#dbeafe", borderColor: "#93c5fd" },
+  urgent:    { label: "紧急", textColor: "#b91c1c", bgColor: "#fee2e2", borderColor: "#fca5a5" }
+};
+
 // ─── Helper functions ──────────────────────────────────────────────
 
 export function getClassLevel(xp: number): number {
@@ -331,11 +380,11 @@ export function getTierLabel(className: ClassName, tier: number): string {
 
 export function initClassState(): Record<ClassName, ClassState> {
   return {
-    Wizard: { xp: 0, scrolls: 0, skills: [] },
-    Fighter: { xp: 0, scrolls: 0, skills: [] },
-    Rogue: { xp: 0, scrolls: 0, skills: [] },
-    Bard: { xp: 0, scrolls: 0, skills: [] },
-    Cleric: { xp: 0, scrolls: 0, skills: [] }
+    Wizard: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
+    Fighter: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
+    Rogue: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
+    Bard: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
+    Cleric: { xp: 0, scrolls: 0, skills: [], fatigue: 0 }
   };
 }
 

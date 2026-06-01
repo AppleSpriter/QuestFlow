@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { BookOpen, Scroll, X } from "lucide-react";
 import {
@@ -24,11 +24,32 @@ export function Spellbook({ onClose }: { onClose: () => void }) {
   const classStates = useQuestStore((s) => s.classStates);
   const useScrollAction = useQuestStore((s) => s.useScroll);
   const [scrollReveal, setScrollReveal] = useState<ScrollRevealInfo | null>(null);
+  const scrollRevealQueueRef = useRef<ScrollRevealInfo[]>([]);
+  const scrollRevealPlayingRef = useRef(false);
+
+  const playNextScrollReveal = useCallback(() => {
+    if (scrollRevealPlayingRef.current) return;
+    const next = scrollRevealQueueRef.current.shift();
+    if (!next) return;
+
+    scrollRevealPlayingRef.current = true;
+    setScrollReveal(next);
+    setTimeout(() => {
+      setScrollReveal(null);
+      scrollRevealPlayingRef.current = false;
+      setTimeout(playNextScrollReveal, 180);
+    }, 2800);
+  }, []);
+
+  const enqueueScrollReveal = useCallback((info: ScrollRevealInfo) => {
+    scrollRevealQueueRef.current.push(info);
+    playNextScrollReveal();
+  }, [playNextScrollReveal]);
 
   const handleUseScroll = (cn: ClassName) => {
     const result = useScrollAction(cn);
     if (!result) return;
-    setScrollReveal({
+    enqueueScrollReveal({
       className: cn,
       lineId: result.lineId,
       isNew: result.isNew,
@@ -36,7 +57,6 @@ export function Spellbook({ onClose }: { onClose: () => void }) {
       fromTier: result.fromTier,
       toTier: result.toTier
     });
-    setTimeout(() => setScrollReveal(null), 2800);
   };
 
   useEffect(() => {

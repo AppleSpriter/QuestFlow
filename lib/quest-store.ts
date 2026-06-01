@@ -7,6 +7,7 @@ import {
   type ClassState,
   type SkillCheckResult,
   type OwnedSkill,
+  type TaskTag,
   initClassState,
   getClassLevel,
   rollSkillCheck,
@@ -14,7 +15,11 @@ import {
   getLineById,
   getSkillNameAtTier,
   getTierFromCopies,
-  getMapRegion
+  getMapRegion,
+  getFatigueMultiplier,
+  getTagBonus,
+  FATIGUE_PER_PROGRESS,
+  SHORT_REST_RECOVERY
 } from "@/data/classes";
 
 export type QuestStatus = "active" | "paused" | "archived";
@@ -25,6 +30,7 @@ export type QuestTask = {
   progressCount: number;
   status: QuestStatus;
   className: ClassName;
+  tags: TaskTag[];
   createdAt: string;
   updatedAt: string;
   lastFocusedAt?: string;
@@ -43,6 +49,9 @@ export type ProgressLog = {
   scrollCount?: number;
   newSkill?: string;
   skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
+  fatigueBefore?: number;
+  fatigueAfter?: number;
+  synergyBonus?: boolean;
 };
 
 export type ProgressResult = {
@@ -61,12 +70,34 @@ export type ProgressResult = {
   scrollCount?: number;
   newSkill?: string;
   skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
+  fatigueBefore?: number;
+  fatigueAfter?: number;
+  synergyBonus?: boolean;
   at: string;
 };
 
 export type StreakState = {
   count: number;
   lastProgressDate?: string;
+};
+
+export type RestState = {
+  type: "short" | "long";
+  startedAt: string;
+  endsAt: string;
+};
+
+export type LongRestSummary = {
+  date: string;
+  classSummaries: Record<ClassName, {
+    progressCount: number;
+    xpGained: number;
+    scrollsEarned: number;
+    skillEvents: string[];
+  }>;
+  totalXp: number;
+  totalScrolls: number;
+  streak: number;
 };
 
 export type QuestBackup = {
@@ -84,6 +115,7 @@ export type QuestBackup = {
   classStates: Record<ClassName, ClassState>;
   lastProgressDate?: string;
   lastSyncedAt?: string;
+  lastProgressClass?: ClassName;
 };
 
 type QuestStore = {
@@ -98,11 +130,17 @@ type QuestStore = {
   lastProgressDate?: string;
   dataUpdatedAt?: string;
   lastSyncedAt?: string;
-  addTask: (title: string, className?: ClassName) => string | null;
+  lastProgressClass?: ClassName;
+  restState?: RestState;
+  addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
   progressTask: (taskId: string, note?: string) => ProgressResult | null;
   useScroll: (className: ClassName) => { lineId: string; isNew: boolean; upgraded: boolean; fromTier: number; toTier: number } | null;
+  startShortRest: () => void;
+  startLongRest: () => void;
+  completeRest: () => void;
+  cancelRest: () => void;
   getBackupData: () => QuestBackup;
   exportData: () => void;
   importData: (jsonString: string, options?: { markSyncedAt?: string }) => boolean;
@@ -144,6 +182,7 @@ const normalizeTasks = (tasks: unknown): QuestTask[] => {
       progressCount: typeof item.progressCount === "number" ? item.progressCount : 0,
       status: item.status === "paused" || item.status === "archived" ? item.status : "active",
       className: isClassName(item.className) ? item.className : "Wizard",
+      tags: Array.isArray(item.tags) ? item.tags.filter((t: string) => t === "important" || t === "urgent") as TaskTag[] : [],
       createdAt,
       updatedAt,
       lastFocusedAt: typeof item.lastFocusedAt === "string" ? item.lastFocusedAt : undefined
@@ -207,7 +246,7 @@ const createBackupData = (state: QuestStore): QuestBackup => {
 
   return {
     app: "questflow",
-    version: 6,
+    version: 7,
     exportedAt,
     updatedAt: getDerivedUpdatedAt(state) ?? exportedAt,
     tasks: state.tasks,
@@ -219,7 +258,8 @@ const createBackupData = (state: QuestStore): QuestBackup => {
     momentumCount: state.momentumCount,
     classStates: state.classStates,
     lastProgressDate: state.lastProgressDate,
-    lastSyncedAt: state.lastSyncedAt
+    lastSyncedAt: state.lastSyncedAt,
+    lastProgressClass: state.lastProgressClass
   };
 };
 
@@ -250,8 +290,10 @@ export const useQuestStore = create<QuestStore>()(
       lastProgressDate: undefined,
       dataUpdatedAt: undefined,
       lastSyncedAt: undefined,
+      lastProgressClass: undefined,
+      restState: undefined,
 
-      addTask: (rawTitle, className: ClassName = "Wizard") => {
+      addTask: (rawTitle, className: ClassName = "Wizard", tags: TaskTag[] = []) => {
         const title = rawTitle.trim();
         if (!title) return null;
         const now = new Date().toISOString();
@@ -261,6 +303,7 @@ export const useQuestStore = create<QuestStore>()(
           progressCount: 0,
           status: "active",
           className,
+          tags,
           createdAt: now,
           updatedAt: now,
           lastFocusedAt: now
@@ -308,16 +351,28 @@ export const useQuestStore = create<QuestStore>()(
         const progressCount = task.progressCount + 1;
         const taskClassName = isClassName(task.className) ? task.className : "Wizard";
 
+        // Fatigue
+        const fatigueBefore = state.classStates[taskClassName].fatigue;
+        const fatigueAfter = Math.min(100, fatigueBefore + FATIGUE_PER_PROGRESS);
+        const fatigueMultiplier = getFatigueMultiplier(fatigueBefore);
+
+        // Tag bonus
+        const tagBonus = getTagBonus(task.tags ?? []);
+
+        // Party Synergy: switching class from last progress
+        const synergyActive = !!state.lastProgressClass && state.lastProgressClass !== taskClassName;
+
         // XP
         const momentum =
           state.momentumTaskId === taskId ? state.momentumCount + 1 : 1;
         const momentumBonus = momentum >= 3 ? 10 : 0;
         const milestone = milestones.has(progressCount) ? progressCount : undefined;
         const milestoneBonus = milestone ? (milestoneXpBonus[milestone] ?? 50) : 0;
-        const baseXp = 5 + momentumBonus + milestoneBonus;
+        const synergyBonusXp = synergyActive ? 10 : 0;
+        const baseXp = Math.round((5 + tagBonus + momentumBonus + milestoneBonus + synergyBonusXp) * fatigueMultiplier);
 
         // Class XP
-        let classXpAwarded = 5;
+        let classXpAwarded = Math.round(5 * fatigueMultiplier);
         let scrollsAwarded = 0;
 
         // Skill check (50% chance)
@@ -326,11 +381,12 @@ export const useQuestStore = create<QuestStore>()(
         if (triggerCheck) {
           const classLevel = getClassLevel(state.classStates[taskClassName].xp);
           skillCheck = rollSkillCheck(taskClassName, classLevel);
-          classXpAwarded += skillCheck.xpBonus;
+          classXpAwarded += Math.round(skillCheck.xpBonus * fatigueMultiplier);
 
           // Scroll on success (1 for success, 2 for critical)
           if (skillCheck.scrollEarned) {
-            scrollsAwarded = skillCheck.scrollCount;
+            const scrollCount = synergyActive ? Math.min(skillCheck.scrollCount + 1, 3) : skillCheck.scrollCount;
+            scrollsAwarded = scrollCount;
           }
         }
 
@@ -354,15 +410,19 @@ export const useQuestStore = create<QuestStore>()(
           progressCount,
           skillCheck,
           scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined,
-          scrollCount: skillCheck?.scrollCount
+          scrollCount: skillCheck?.scrollCount,
+          fatigueBefore,
+          fatigueAfter,
+          synergyBonus: synergyActive
         };
 
-        // Update class XP and scrolls
+        // Update class XP, scrolls and fatigue
         const updatedClassStates = { ...state.classStates };
         updatedClassStates[taskClassName] = {
           ...updatedClassStates[taskClassName],
           xp: updatedClassStates[taskClassName].xp + classXpAwarded,
-          scrolls: updatedClassStates[taskClassName].scrolls + scrollsAwarded
+          scrolls: updatedClassStates[taskClassName].scrolls + scrollsAwarded,
+          fatigue: fatigueAfter
         };
 
         set({
@@ -385,6 +445,7 @@ export const useQuestStore = create<QuestStore>()(
           momentumCount: momentum,
           classStates: updatedClassStates,
           lastProgressDate: firstOfDay ? today : state.lastProgressDate,
+          lastProgressClass: taskClassName,
           dataUpdatedAt: at
         });
 
@@ -402,6 +463,9 @@ export const useQuestStore = create<QuestStore>()(
           skillCheck,
           scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined,
           scrollCount: skillCheck?.scrollCount,
+          fatigueBefore,
+          fatigueAfter,
+          synergyBonus: synergyActive,
           at
         };
       },
@@ -488,8 +552,57 @@ export const useQuestStore = create<QuestStore>()(
           classStates: initClassState(),
           lastProgressDate: undefined,
           dataUpdatedAt: now,
-          lastSyncedAt: undefined
+          lastSyncedAt: undefined,
+          lastProgressClass: undefined,
+          restState: undefined
         });
+      },
+
+      startShortRest: () => {
+        const state = get();
+        if (state.restState) return;
+        const now = new Date();
+        const endsAt = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
+        set({ restState: { type: "short", startedAt: now.toISOString(), endsAt }, dataUpdatedAt: now.toISOString() });
+      },
+
+      startLongRest: () => {
+        const state = get();
+        if (state.restState) return;
+        const now = new Date();
+        const endsAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+        set({ restState: { type: "long", startedAt: now.toISOString(), endsAt }, dataUpdatedAt: now.toISOString() });
+      },
+
+      completeRest: () => {
+        const state = get();
+        if (!state.restState) return;
+        const updatedClassStates = { ...state.classStates };
+
+        if (state.restState.type === "short") {
+          // Short rest: reduce fatigue by 30%, min 0
+          for (const cn of classNames) {
+            updatedClassStates[cn] = {
+              ...updatedClassStates[cn],
+              fatigue: Math.max(0, updatedClassStates[cn].fatigue - SHORT_REST_RECOVERY)
+            };
+          }
+        } else {
+          // Long rest: reset all fatigue to 0
+          for (const cn of classNames) {
+            updatedClassStates[cn] = {
+              ...updatedClassStates[cn],
+              fatigue: 0
+            };
+          }
+        }
+
+        const now = new Date().toISOString();
+        set({ classStates: updatedClassStates, restState: undefined, dataUpdatedAt: now });
+      },
+
+      cancelRest: () => {
+        set({ restState: undefined });
       },
 
       markSynced: (syncedAt) => {
@@ -499,7 +612,7 @@ export const useQuestStore = create<QuestStore>()(
     {
       name: "questflow-v1",
       storage: createJSONStorage(() => localStorage),
-      version: 6,
+      version: 7,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;
         let data = persisted;
@@ -548,6 +661,26 @@ export const useQuestStore = create<QuestStore>()(
               candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ??
               undefined,
             lastSyncedAt: data.lastSyncedAt
+          };
+        }
+
+        // v6→v7: add fatigue to ClassState, tags to QuestTask, lastProgressClass
+        if (version < 7) {
+          if (data.classStates) {
+            const cs = data.classStates as Record<string, { fatigue?: number; skills: unknown[]; scrolls: number; xp: number }>;
+            for (const key of Object.keys(cs)) {
+              if (typeof cs[key].fatigue !== "number") {
+                cs[key].fatigue = 0;
+              }
+            }
+          }
+          if (data.tasks) {
+            data.tasks = normalizeTasks(data.tasks);
+          }
+          data = {
+            ...data,
+            lastProgressClass: data.lastProgressClass ?? undefined,
+            restState: undefined
           };
         }
 

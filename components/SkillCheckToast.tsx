@@ -11,6 +11,7 @@ export type SkillCheckInfo = {
   scrollCount?: number;
   newSkill?: string;
   skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
+  synergyBonus?: boolean;
 };
 
 export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
@@ -114,6 +115,17 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
               >
                 📜 {info.scrollEarned}
                 {info.scrollCount && info.scrollCount > 1 ? ` x${info.scrollCount}（大成功双倍）` : " x1"}
+              </motion.div>
+            )}
+
+            {/* Synergy bonus */}
+            {!rolling && info.synergyBonus && (
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: [0.8, 1.2, 1], opacity: 1 }}
+                className="mt-2 inline-flex items-center gap-1 rounded-full bg-purple-100 px-3 py-1 text-xs font-bold text-purple-800"
+              >
+                ⚡ 队伍协同 +10 XP
               </motion.div>
             )}
 

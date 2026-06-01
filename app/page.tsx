@@ -8,30 +8,40 @@ import {
   BookOpen,
   ChevronRight,
   Cloud,
+  Coffee,
   Flame,
   Pause,
   Play,
   Plus,
   RotateCcw,
   Target,
+  Tent,
   Trophy,
   Zap
 } from "lucide-react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getLevelProgress,
   type ProgressResult,
   type QuestStatus,
   type QuestTask,
+  type RestState,
+  type LongRestSummary,
   useQuestStore
 } from "@/lib/quest-store";
 import {
   type ClassName,
+  type TaskTag,
   ALL_CLASSES,
   CLASS_META,
+  TAG_META,
   getClassLevel,
-  getMapRegion
+  getMapRegion,
+  getFatigueStage,
+  FATIGUE_STAGE_META,
+  SHORT_REST_MINUTES,
+  LONG_REST_MINUTES
 } from "@/data/classes";
 import { TaskMapProgress } from "@/components/TaskMapProgress";
 import { SkillCheckToast, type SkillCheckInfo } from "@/components/SkillCheckToast";
@@ -78,6 +88,38 @@ const regionBackgrounds: Record<string, string> = {
   stars: "linear-gradient(180deg, #f8f5ff 0%, #ede5f8 50%, #ddd0f0 100%)"
 };
 
+const classNames: ClassName[] = ["Wizard", "Fighter", "Rogue", "Bard", "Cleric"];
+
+function buildLongRestSummary(
+  logs: Array<{ at: string; classXpAwarded: number; scrollEarned?: string; scrollCount?: number; skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName } }>,
+  classStates: Record<ClassName, { xp: number; scrolls: number; skills: { lineId: string; currentTier: number }[] }>,
+  streakCount: number
+): LongRestSummary {
+  const today = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date());
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayLogs = logs.filter((l) => new Date(l.at) >= todayStart);
+
+  const classSummaries: LongRestSummary["classSummaries"] = {} as LongRestSummary["classSummaries"];
+  let totalXp = 0;
+  let totalScrolls = 0;
+
+  for (const cn of classNames) {
+    const cnLogs = todayLogs.filter((l) => {
+      // approximate: logs don't store className directly, use scrollType or skillUpgrade
+      return l.scrollEarned === CLASS_META[cn].scrollName || l.skillUpgrade?.className === cn;
+    });
+    const xpGained = cnLogs.reduce((sum, l) => sum + l.classXpAwarded, 0);
+    const scrollsEarned = cnLogs.reduce((sum, l) => sum + (l.scrollCount ?? 0), 0);
+    const skillEvents = cnLogs.filter((l) => l.skillUpgrade).map((l) => l.skillUpgrade ? `${l.skillUpgrade.name} → ${l.skillUpgrade.toTier}环` : "");
+
+    classSummaries[cn] = { progressCount: cnLogs.length, xpGained, scrollsEarned, skillEvents };
+    totalXp += xpGained;
+    totalScrolls += scrollsEarned;
+  }
+
+  return { date: today, classSummaries, totalXp, totalScrolls, streak: streakCount };
+}
+
 export default function QuestFlowPage() {
   const tasks = useQuestStore((state) => state.tasks);
   const logs = useQuestStore((state) => state.logs);
@@ -100,7 +142,55 @@ export default function QuestFlowPage() {
   const [focusFlash, setFocusFlash] = useState(false);
   const [celebration, setCelebration] = useState<ProgressResult | null>(null);
   const [skillCheckInfo, setSkillCheckInfo] = useState<SkillCheckInfo | null>(null);
+  const progressQueueRef = useRef<ProgressResult[]>([]);
+  const progressPlayingRef = useRef(false);
+  const skillCheckQueueRef = useRef<SkillCheckInfo[]>([]);
+  const skillCheckPlayingRef = useRef(false);
   const [showSpellbook, setShowSpellbook] = useState(false);
+  const [selectedTags, setSelectedTags] = useState<TaskTag[]>([]);
+  const [showLongRestSummary, setShowLongRestSummary] = useState<LongRestSummary | null>(null);
+  const [restCountdown, setRestCountdown] = useState<number | null>(null);
+  const [showRestCompleteConfirm, setShowRestCompleteConfirm] = useState(false);
+
+  const restState = useQuestStore((state) => state.restState);
+  const startShortRest = useQuestStore((state) => state.startShortRest);
+  const startLongRest = useQuestStore((state) => state.startLongRest);
+  const completeRest = useQuestStore((state) => state.completeRest);
+  const cancelRest = useQuestStore((state) => state.cancelRest);
+  const lastProgressClass = useQuestStore((state) => state.lastProgressClass);
+
+  // Rest countdown timer
+  useEffect(() => {
+    if (!restState) {
+      setRestCountdown(null);
+      return;
+    }
+    const update = () => {
+      const remaining = new Date(restState.endsAt).getTime() - Date.now();
+      if (remaining <= 0) {
+        setShowRestCompleteConfirm(true);
+        return;
+      }
+      setRestCountdown(Math.ceil(remaining / 1000));
+    };
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [restState]);
+
+  const handleRestCompleteConfirm = () => {
+    if (restState?.type === "long") {
+      const state = useQuestStore.getState();
+      const summary = buildLongRestSummary(state.logs, state.classStates, state.streak.count);
+      setShowLongRestSummary(summary);
+    }
+    completeRest();
+    setShowRestCompleteConfirm(false);
+  };
+
+  const handleQuickFinish = () => {
+    setShowRestCompleteConfirm(true);
+  };
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -114,9 +204,10 @@ export default function QuestFlowPage() {
   const focusBg = regionBackgrounds[focusRegionId] ?? regionBackgrounds.camp;
 
   const createQuest = () => {
-    const newTaskId = addTask(title, selectedClass);
+    const newTaskId = addTask(title, selectedClass, selectedTags);
     if (!newTaskId) return;
     setTitle("");
+    setSelectedTags([]);
     setStatusFilter("active");
     if (!focusTaskId) {
       setFocusFlash(true);
@@ -136,31 +227,66 @@ export default function QuestFlowPage() {
     setTimeout(() => setFocusFlash(false), 320);
   };
 
+  const playNextSkillCheck = useCallback(() => {
+    if (skillCheckPlayingRef.current) return;
+    const next = skillCheckQueueRef.current.shift();
+    if (!next) return;
+
+    skillCheckPlayingRef.current = true;
+    setSkillCheckInfo(next);
+    setTimeout(() => {
+      setSkillCheckInfo(null);
+      skillCheckPlayingRef.current = false;
+      setTimeout(playNextSkillCheck, 180);
+    }, 3000);
+  }, []);
+
+  const enqueueSkillCheck = useCallback((info: SkillCheckInfo) => {
+    skillCheckQueueRef.current.push(info);
+    playNextSkillCheck();
+  }, [playNextSkillCheck]);
+
+  const playNextProgress = useCallback(() => {
+    if (progressPlayingRef.current) return;
+    const next = progressQueueRef.current.shift();
+    if (!next) return;
+
+    progressPlayingRef.current = true;
+    setLastProgress(next);
+    setPulseTaskId(next.taskId);
+    if (next.milestone) setCelebration(next);
+
+    setTimeout(() => setPulseTaskId(null), 760);
+    setTimeout(() => {
+      setLastProgress(null);
+      if (next.milestone) setCelebration(null);
+      progressPlayingRef.current = false;
+      setTimeout(playNextProgress, 180);
+    }, 1200);
+  }, []);
+
+  const enqueueProgress = useCallback((result: ProgressResult) => {
+    progressQueueRef.current.push(result);
+    playNextProgress();
+  }, [playNextProgress]);
+
   const pushProgress = useCallback((taskId: string, note?: string) => {
     const result = progressTask(taskId, note);
     if (!result) return;
 
-    setLastProgress(result);
-    setPulseTaskId(taskId);
-    setTimeout(() => setPulseTaskId(null), 760);
-    setTimeout(() => setLastProgress(null), 1200);
-
-    if (result.milestone) {
-      setCelebration(result);
-      setTimeout(() => setCelebration(null), 1150);
-    }
+    enqueueProgress(result);
 
     if (result.skillCheck) {
-      setSkillCheckInfo({
+      enqueueSkillCheck({
         check: result.skillCheck,
         scrollEarned: result.scrollEarned,
         scrollCount: result.scrollCount,
         newSkill: result.newSkill,
-        skillUpgrade: result.skillUpgrade ? { ...result.skillUpgrade, className: result.skillCheck.className } : undefined
+        skillUpgrade: result.skillUpgrade ? { ...result.skillUpgrade, className: result.skillCheck.className } : undefined,
+        synergyBonus: result.synergyBonus
       });
-      setTimeout(() => setSkillCheckInfo(null), 3000);
     }
-  }, [progressTask]);
+  }, [enqueueProgress, enqueueSkillCheck, progressTask]);
 
   const pushFocusProgress = () => {
     if (!focusTask) return;
@@ -226,7 +352,7 @@ export default function QuestFlowPage() {
         </section>
       </header>
 
-      {/* Class Builds summary */}
+      {/* Party Status */}
       <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         {ALL_CLASSES.map((cn) => {
           const meta = CLASS_META[cn];
@@ -236,6 +362,8 @@ export default function QuestFlowPage() {
           const xpPercent = Math.min(100, currentXp);
           const scrollCount = cs.scrolls;
           const skillCount = cs.skills.length;
+          const fatigueStage = getFatigueStage(cs.fatigue);
+          const stageMeta = FATIGUE_STAGE_META[fatigueStage];
           return (
             <div key={cn} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${classStyles[cn]}`}>
               <div className="flex items-center justify-between gap-2">
@@ -249,6 +377,7 @@ export default function QuestFlowPage() {
                 </div>
               </div>
               <div className="mt-1.5 flex items-center gap-2">
+                <span className="shrink-0 text-[10px] opacity-60">XP</span>
                 <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
                   <motion.div
                     className="h-full rounded-full bg-current opacity-70"
@@ -258,6 +387,20 @@ export default function QuestFlowPage() {
                   />
                 </div>
                 <span className="shrink-0 text-[10px] opacity-70">{currentXp}/100</span>
+              </div>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="shrink-0 text-[10px] opacity-60">{stageMeta.emoji}</span>
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
+                  <motion.div
+                    key={`${cn}-fatigue-${fatigueStage}`}
+                    className="h-full rounded-full"
+                    style={{ backgroundColor: stageMeta.color }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${cs.fatigue}%` }}
+                    transition={{ duration: 0.45, ease: "easeOut" }}
+                  />
+                </div>
+                <span className="shrink-0 text-[10px] opacity-70">{cs.fatigue}%</span>
               </div>
             </div>
           );
@@ -274,6 +417,48 @@ export default function QuestFlowPage() {
           <BookOpen size={16} />
           Spellbook
         </button>
+        {restState ? (
+          <div className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
+            {restState.type === "short" ? <Coffee size={16} /> : <Tent size={16} />}
+            {restState.type === "short" ? "短休中" : "长休中"}
+            {restCountdown !== null && (
+              <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold">{Math.floor(restCountdown / 60)}:{String(restCountdown % 60).padStart(2, "0")}</span>
+            )}
+            <button
+              type="button"
+              onClick={handleQuickFinish}
+              className="ml-1 rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-600 hover:bg-emerald-100"
+            >
+              提前结束
+            </button>
+            <button
+              type="button"
+              onClick={cancelRest}
+              className="rounded border border-amber-300 bg-white px-2 py-0.5 text-xs font-semibold text-amber-600 hover:bg-amber-100"
+            >
+              取消
+            </button>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={startShortRest}
+              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100"
+            >
+              <Coffee size={16} />
+              短休 {SHORT_REST_MINUTES}min
+            </button>
+            <button
+              type="button"
+              onClick={startLongRest}
+              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+            >
+              <Tent size={16} />
+              长休 {LONG_REST_MINUTES}min
+            </button>
+          </>
+        )}
         <div className="flex-1" />
         <Link
           href="/sync"
@@ -323,6 +508,32 @@ export default function QuestFlowPage() {
               </button>
             );
           })}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-500">标签</span>
+          {(["important", "urgent"] as TaskTag[]).map((tag) => {
+            const meta = TAG_META[tag];
+            const active = selectedTags.includes(tag);
+            const bonus = tag === "important" ? 3 : 2;
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => setSelectedTags((prev) => active ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                className="rounded-full border px-3 py-1.5 text-xs font-semibold transition"
+                style={active ? {
+                  color: meta.textColor,
+                  backgroundColor: meta.bgColor,
+                  borderColor: meta.borderColor
+                } : undefined}
+              >
+                {meta.label} {active ? `+${bonus} XP` : ""}
+              </button>
+            );
+          })}
+          {selectedTags.includes("important") && selectedTags.includes("urgent") && (
+            <span className="rounded-full bg-purple-100 px-2 py-1 text-xs font-bold text-purple-700">🟣 +5 XP</span>
+          )}
           <div className="flex-1" />
           <button
             type="submit"
@@ -390,6 +601,49 @@ export default function QuestFlowPage() {
           <ProgressLogPanel logs={focusLogs} task={focusTask} />
         </aside>
       </div>
+
+      {/* Rest Complete Confirm */}
+      {showRestCompleteConfirm && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.div
+            className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-2xl"
+            initial={{ scale: 0.9, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+          >
+            <div className="text-4xl">{restState?.type === "short" ? "☕" : "🏕️"}</div>
+            <h3 className="mt-3 text-lg font-bold text-slate-950">
+              {restState?.type === "short" ? "短休结束" : "长休结束"}
+            </h3>
+            <p className="mt-2 text-sm text-slate-500">
+              {restState?.type === "short" ? "你已经休息好了吗？" : "你已经休息好了吗？疲劳将全部恢复。"}
+            </p>
+            <div className="mt-4 flex justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRestCompleteConfirm(false)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                再等一会
+              </button>
+              <button
+                type="button"
+                onClick={handleRestCompleteConfirm}
+                className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-600"
+              >
+                休息好了
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Long Rest Summary */}
+      {showLongRestSummary && <LongRestSummaryModal summary={showLongRestSummary} onClose={() => setShowLongRestSummary(null)} />}
 
       {/* Spellbook */}
       {showSpellbook && <Spellbook onClose={() => setShowSpellbook(false)} />}
@@ -565,6 +819,14 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
               {CLASS_META[taskClass].emoji} {taskClass}
             </span>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">{task.status}</span>
+            {(task.tags ?? []).map((tag) => {
+              const meta = TAG_META[tag];
+              return (
+                <span key={tag} className="rounded-full px-2 py-1 text-xs font-semibold" style={{ color: meta.textColor, backgroundColor: meta.bgColor }}>
+                  {meta.label}
+                </span>
+              );
+            })}
           </div>
           <div className="mt-2"><TaskMapProgress progressCount={task.progressCount} /></div>
         </div>
@@ -704,6 +966,83 @@ function MilestoneOverlay({ result }: { result: ProgressResult }) {
         </motion.div>
         <div className="mt-3 text-2xl font-bold text-slate-950">已推进 {result.milestone} 次</div>
         <div className="mt-2 text-base font-semibold text-amber-600">Milestone +{result.xpAwarded} XP</div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function LongRestSummaryModal({ summary, onClose }: { summary: LongRestSummary; onClose: () => void }) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+        initial={{ scale: 0.9, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.9, y: 20 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 text-center">
+          <Tent className="mx-auto text-emerald-500" size={36} />
+          <h2 className="mt-2 text-2xl font-bold text-slate-950">🏕 今日冒险总结</h2>
+          <p className="text-sm text-slate-500">{summary.date}</p>
+        </div>
+
+        <div className="space-y-3">
+          {classNames.map((cn) => {
+            const meta = CLASS_META[cn];
+            const cs = summary.classSummaries[cn];
+            if (cs.progressCount === 0 && cs.xpGained === 0) return null;
+            return (
+              <div key={cn} className={`rounded-xl border-2 p-4 ${meta.borderColor} ${meta.bgColor}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">{meta.emoji}</span>
+                  <div>
+                    <h3 className={`text-lg font-bold ${meta.color}`}>{cn}（{meta.label}）</h3>
+                    <p className="text-xs text-slate-500">+{cs.progressCount} Progress · +{cs.xpGained} XP{cs.scrollsEarned > 0 ? ` · 📜 x${cs.scrollsEarned}` : ""}</p>
+                  </div>
+                </div>
+                {cs.skillEvents.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {cs.skillEvents.map((evt, i) => (
+                      <span key={i} className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold text-violet-700">⬆️ {evt}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 flex items-center justify-center gap-6 text-center">
+          <div>
+            <div className="text-2xl font-bold text-slate-950">{summary.totalXp}</div>
+            <div className="text-xs text-slate-500">总经验</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-amber-600">{summary.totalScrolls}</div>
+            <div className="text-xs text-slate-500">总卷轴</div>
+          </div>
+          <div>
+            <div className="text-2xl font-bold text-orange-600">🔥 {summary.streak}</div>
+            <div className="text-xs text-slate-500">连续天数</div>
+          </div>
+        </div>
+
+        <div className="mt-4 text-center">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-slate-950 px-6 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            开启下一轮冒险
+          </button>
+        </div>
       </motion.div>
     </motion.div>
   );
