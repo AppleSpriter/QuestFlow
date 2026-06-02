@@ -1,12 +1,18 @@
 {
   "name": "questflow-v1",
   "version": "0.1.0",
+  "description": "QuestFlow desktop progress tracker",
+  "author": "QuestFlow",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "desktop:dev": "concurrently -k -n NEXT,ELECTRON -c cyan,magenta \"next dev -p 3100\" \"wait-on http://localhost:3100 && QUESTFLOW_DEV_URL=http://localhost:3100 electron .\"",
+    "desktop:dir": "next build && electron-builder --dir",
+    "desktop:build": "next build && electron-builder --mac"
   },
   "dependencies": {
     "framer-motion": "^12.0.0",
@@ -22,10 +28,59 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^10.0.1",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.0.0",
     "eslint-config-next": "^15.0.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.questflow.desktop",
+    "productName": "QuestFlow",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "next",
+        "filter": [
+          "**/*",
+          "!node_modules/**"
+        ]
+      },
+      {
+        "from": ".next/standalone/node_modules",
+        "to": "next/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".next/static",
+        "to": "next/.next/static"
+      },
+      {
+        "from": "public",
+        "to": "next/public"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    }
   }
 }
