@@ -8,6 +8,7 @@ import {
 } from "@/lib/server/webdav-config";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function GET() {
   const config = await readWebDavConfig();

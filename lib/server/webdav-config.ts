@@ -11,11 +11,14 @@ export type WebDavConfig = {
 export const defaultWebDavFilePath = "questflow/questflow-backup.json";
 
 const configFileName = ".questflow-webdav.local.json";
-const configFilePath = path.join(process.cwd(), configFileName);
 
-export const getWebDavConfigFilePath = () => configFilePath;
+export const getWebDavConfigFilePath = () => {
+  const configuredPath = process.env.QUESTFLOW_WEBDAV_CONFIG?.trim();
+  return configuredPath ? path.resolve(configuredPath) : path.join(process.cwd(), configFileName);
+};
 
 export const readWebDavConfig = async (): Promise<Partial<WebDavConfig>> => {
+  const configFilePath = getWebDavConfigFilePath();
   try {
     const raw = await fs.readFile(configFilePath, "utf8");
     return JSON.parse(raw) as Partial<WebDavConfig>;
@@ -28,6 +31,8 @@ export const readWebDavConfig = async (): Promise<Partial<WebDavConfig>> => {
 };
 
 export const writeWebDavConfig = async (config: WebDavConfig) => {
+  const configFilePath = getWebDavConfigFilePath();
+  await fs.mkdir(path.dirname(configFilePath), { recursive: true });
   await fs.writeFile(configFilePath, `${JSON.stringify(config, null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600
