@@ -698,7 +698,7 @@ function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }
           <motion.div key={task.id} initial={{ opacity: 0, x: 42 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -42 }} transition={{ duration: 0.26 }}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="min-w-0">
-                <h2 className="break-words text-3xl font-semibold text-slate-950 sm:text-4xl">{task.title}</h2>
+                <h2 className="break-words text-3xl font-semibold sm:text-4xl" style={{ color: CLASS_META[taskClass].hexColor }}>{task.title}</h2>
                 <div className="mt-3 flex flex-wrap gap-2 text-sm text-slate-500">
                   <span>Progress {task.progressCount}</span>
                   <span>最近更新 {relativeTime(task.updatedAt)}</span>
@@ -811,7 +811,7 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="break-words text-lg font-semibold text-slate-950">{task.title}</h3>
+            <h3 className="break-words text-lg font-semibold" style={{ color: CLASS_META[taskClass].hexColor }}>{task.title}</h3>
             {isFocus && <span className="rounded-full bg-slate-950 px-2 py-1 text-xs font-semibold text-white">Focus</span>}
           </div>
           <div className="mt-2 flex flex-wrap gap-2">

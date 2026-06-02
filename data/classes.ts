@@ -46,6 +46,7 @@ export const CLASS_META: Record<ClassName, {
   color: string;
   bgColor: string;
   borderColor: string;
+  hexColor: string;
   scrollName: string;
   checkSkills: string[];
   tierLabels: string[];
@@ -56,6 +57,7 @@ export const CLASS_META: Record<ClassName, {
     color: "text-violet-700",
     bgColor: "bg-violet-50",
     borderColor: "border-violet-300",
+    hexColor: "#7c3aed",
     scrollName: "奥术卷轴",
     checkSkills: ["奥术", "调查", "历史", "自然"],
     tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
@@ -66,6 +68,7 @@ export const CLASS_META: Record<ClassName, {
     color: "text-red-700",
     bgColor: "bg-red-50",
     borderColor: "border-red-300",
+    hexColor: "#b91c1c",
     scrollName: "战技卷轴",
     checkSkills: ["运动", "威吓", "察觉", "生存"],
     tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
@@ -76,6 +79,7 @@ export const CLASS_META: Record<ClassName, {
     color: "text-slate-700",
     bgColor: "bg-slate-50",
     borderColor: "border-slate-300",
+    hexColor: "#334155",
     scrollName: "诡术卷轴",
     checkSkills: ["隐匿", "巧手", "调查", "察觉"],
     tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
@@ -86,6 +90,7 @@ export const CLASS_META: Record<ClassName, {
     color: "text-amber-700",
     bgColor: "bg-amber-50",
     borderColor: "border-amber-300",
+    hexColor: "#b45309",
     scrollName: "灵感卷轴",
     checkSkills: ["说服", "欺瞒", "表演", "历史"],
     tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
@@ -96,6 +101,7 @@ export const CLASS_META: Record<ClassName, {
     color: "text-sky-700",
     bgColor: "bg-sky-50",
     borderColor: "border-sky-300",
+    hexColor: "#0369a1",
     scrollName: "神恩卷轴",
     checkSkills: ["宗教", "医疗", "洞察", "说服"],
     tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],

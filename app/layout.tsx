@@ -3,7 +3,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "QuestFlow",
-  description: "A lightweight progress tracker for long-running quests."
+  description: "A lightweight progress tracker for long-running quests.",
+  icons: {
+    icon: "/image.png",
+  },
 };
 
 export default function RootLayout({
