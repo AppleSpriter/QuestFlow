@@ -6,7 +6,9 @@ import Link from "next/link";
 import {
   Archive,
   BookOpen,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Cloud,
   Coffee,
   Flame,
@@ -151,6 +153,7 @@ export default function QuestFlowPage() {
   const [showLongRestSummary, setShowLongRestSummary] = useState<LongRestSummary | null>(null);
   const [restCountdown, setRestCountdown] = useState<number | null>(null);
   const [showRestCompleteConfirm, setShowRestCompleteConfirm] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
   const restState = useQuestStore((state) => state.restState);
   const startShortRest = useQuestStore((state) => state.startShortRest);
@@ -470,81 +473,107 @@ export default function QuestFlowPage() {
       </div>
 
       {/* Create form */}
-      <form onSubmit={submitTask} className="mb-5 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-        <label className="sr-only" htmlFor="quest-title">新建任务</label>
-        <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3">
-          <Plus size={17} className="shrink-0 text-slate-500" />
-          <textarea
-            id="quest-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                createQuest();
-              }
-            }}
-            placeholder="新增 Quest，⌘+Enter 创建"
-            rows={1}
-            className="focus-ring min-h-11 w-full resize-none overflow-hidden bg-transparent py-3 text-sm leading-5 text-slate-950 placeholder:text-slate-400"
-          />
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-slate-500">Class</span>
-          {ALL_CLASSES.map((cn) => {
-            const meta = CLASS_META[cn];
-            return (
-              <button
-                key={cn}
-                type="button"
-                onClick={() => setSelectedClass(cn)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                  selectedClass === cn
-                    ? classStyles[cn]
-                    : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
-                }`}
-              >
-                {meta.emoji} {cn}（{meta.label}）
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-slate-500">标签</span>
-          {(["important", "urgent"] as TaskTag[]).map((tag) => {
-            const meta = TAG_META[tag];
-            const active = selectedTags.includes(tag);
-            const bonus = tag === "important" ? 3 : 2;
-            return (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => setSelectedTags((prev) => active ? prev.filter((t) => t !== tag) : [...prev, tag])}
-                className="rounded-full border px-3 py-1.5 text-xs font-semibold transition"
-                style={active ? {
-                  color: meta.textColor,
-                  backgroundColor: meta.bgColor,
-                  borderColor: meta.borderColor
-                } : undefined}
-              >
-                {meta.label} {active ? `+${bonus} XP` : ""}
-              </button>
-            );
-          })}
-          {selectedTags.includes("important") && selectedTags.includes("urgent") && (
-            <span className="rounded-full bg-purple-100 px-2 py-1 text-xs font-bold text-purple-700">🟣 +5 XP</span>
+      <div className="mb-5 rounded-lg border border-slate-200 bg-white shadow-sm">
+        <button
+          type="button"
+          onClick={() => setShowCreateForm((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+        >
+          <span className="flex items-center gap-2">
+            <Plus size={16} />
+            新建任务
+          </span>
+          {showCreateForm ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+        <AnimatePresence>
+          {showCreateForm && (
+            <motion.form
+              onSubmit={submitTask}
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="border-t border-slate-100 px-3 pt-3 pb-3">
+                <label className="sr-only" htmlFor="quest-title">新建任务</label>
+                <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3">
+                  <Plus size={17} className="shrink-0 text-slate-500" />
+                  <textarea
+                    id="quest-title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        createQuest();
+                      }
+                    }}
+                    placeholder="新增 Quest，⌘+Enter 创建"
+                    rows={1}
+                    className="focus-ring min-h-11 w-full resize-none overflow-hidden bg-transparent py-3 text-sm leading-5 text-slate-950 placeholder:text-slate-400"
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-slate-500">Class</span>
+                  {ALL_CLASSES.map((cn) => {
+                    const meta = CLASS_META[cn];
+                    return (
+                      <button
+                        key={cn}
+                        type="button"
+                        onClick={() => setSelectedClass(cn)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                          selectedClass === cn
+                            ? classStyles[cn]
+                            : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                        }`}
+                      >
+                        {meta.emoji} {cn}（{meta.label}）
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-slate-500">标签</span>
+                  {(["important", "urgent"] as TaskTag[]).map((tag) => {
+                    const meta = TAG_META[tag];
+                    const active = selectedTags.includes(tag);
+                    const bonus = tag === "important" ? 3 : 2;
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => setSelectedTags((prev) => active ? prev.filter((t) => t !== tag) : [...prev, tag])}
+                        className="rounded-full border px-3 py-1.5 text-xs font-semibold transition"
+                        style={active ? {
+                          color: meta.textColor,
+                          backgroundColor: meta.bgColor,
+                          borderColor: meta.borderColor
+                        } : undefined}
+                      >
+                        {meta.label} {active ? `+${bonus} XP` : ""}
+                      </button>
+                    );
+                  })}
+                  {selectedTags.includes("important") && selectedTags.includes("urgent") && (
+                    <span className="rounded-full bg-purple-100 px-2 py-1 text-xs font-bold text-purple-700">🟣 +5 XP</span>
+                  )}
+                  <div className="flex-1" />
+                  <button
+                    type="submit"
+                    className="focus-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!title.trim()}
+                  >
+                    <Plus size={17} />
+                    Create
+                  </button>
+                </div>
+              </div>
+            </motion.form>
           )}
-          <div className="flex-1" />
-          <button
-            type="submit"
-            className="focus-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!title.trim()}
-          >
-            <Plus size={17} />
-            Create
-          </button>
-        </div>
-      </form>
+        </AnimatePresence>
+      </div>
 
       {/* Main content */}
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_390px]">
@@ -557,6 +586,32 @@ export default function QuestFlowPage() {
             lastProgress={lastProgress}
             isPulsing={pulseTaskId === focusTask?.id}
           />
+
+          {/* Quick switch active tasks */}
+          {activeTasks.length > 1 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {activeTasks.map((t) => {
+                const tc = getTaskClass(t);
+                const isCurrent = t.id === focusTask?.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => changeFocus(t.id)}
+                    className={`inline-flex max-w-[180px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                      isCurrent
+                        ? "border-slate-950 bg-slate-950 text-white"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                    style={isCurrent ? undefined : { color: CLASS_META[tc].hexColor, borderColor: CLASS_META[tc].hexColor + "40" }}
+                  >
+                    <span>{CLASS_META[tc].emoji}</span>
+                    <span className="truncate">{t.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <section className="mt-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
