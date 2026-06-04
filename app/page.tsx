@@ -60,7 +60,14 @@ const classStyles: Record<ClassName, string> = {
   Fighter: "border-red-200 bg-red-50 text-red-800",
   Rogue: "border-slate-200 bg-slate-50 text-slate-800",
   Bard: "border-amber-200 bg-amber-50 text-amber-800",
-  Cleric: "border-sky-200 bg-sky-50 text-sky-800"
+  Cleric: "border-sky-200 bg-sky-50 text-sky-800",
+  Paladin: "border-yellow-200 bg-yellow-50 text-yellow-800",
+  Ranger: "border-emerald-200 bg-emerald-50 text-emerald-800",
+  Druid: "border-lime-200 bg-lime-50 text-lime-800",
+  Warlock: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800",
+  Sorcerer: "border-orange-200 bg-orange-50 text-orange-800",
+  Monk: "border-teal-200 bg-teal-50 text-teal-800",
+  Barbarian: "border-stone-200 bg-stone-50 text-stone-800"
 };
 
 const getTaskClass = (task: Pick<QuestTask, "className">): ClassName =>
@@ -84,13 +91,23 @@ const formatLogTime = (iso: string) =>
 
 const regionBackgrounds: Record<string, string> = {
   camp: "linear-gradient(180deg, #faf9f7 0%, #f0ece6 50%, #e8e2d8 100%)",
-  forest: "linear-gradient(180deg, #f0f9f0 0%, #ddf0dd 50%, #c8e6c8 100%)",
-  canyon: "linear-gradient(180deg, #f5f0f8 0%, #e8ddf0 50%, #d5c8e0 100%)",
-  tower: "linear-gradient(180deg, #f0f4fa 0%, #dde5f0 50%, #c8d5e8 100%)",
-  stars: "linear-gradient(180deg, #f8f5ff 0%, #ede5f8 50%, #ddd0f0 100%)"
+  trail: "linear-gradient(180deg, #fff7ed 0%, #fed7aa 50%, #fdba74 100%)",
+  forest: "linear-gradient(180deg, #f0fdf4 0%, #dcfce7 50%, #bbf7d0 100%)",
+  ruins: "linear-gradient(180deg, #f8fafc 0%, #e2e8f0 50%, #cbd5e1 100%)",
+  canyon: "linear-gradient(180deg, #fef2f2 0%, #fecaca 50%, #fca5a5 100%)",
+  swamp: "linear-gradient(180deg, #ecfeff 0%, #ccfbf1 50%, #99f6e4 100%)",
+  tower: "linear-gradient(180deg, #eff6ff 0%, #dbeafe 50%, #bfdbfe 100%)",
+  library: "linear-gradient(180deg, #f5f3ff 0%, #ddd6fe 50%, #c4b5fd 100%)",
+  forge: "linear-gradient(180deg, #fff7ed 0%, #fed7aa 45%, #fb923c 100%)",
+  citadel: "linear-gradient(180deg, #fefce8 0%, #fef08a 50%, #fde047 100%)",
+  abyss: "linear-gradient(180deg, #f1f5f9 0%, #94a3b8 50%, #334155 100%)",
+  astral: "linear-gradient(180deg, #eef2ff 0%, #c7d2fe 50%, #818cf8 100%)",
+  lab: "linear-gradient(180deg, #f0f9ff 0%, #bae6fd 50%, #38bdf8 100%)",
+  throne: "linear-gradient(180deg, #fff1f2 0%, #fecdd3 50%, #fda4af 100%)",
+  legend: "linear-gradient(180deg, #faf5ff 0%, #e9d5ff 45%, #a855f7 100%)"
 };
 
-const classNames: ClassName[] = ["Wizard", "Fighter", "Rogue", "Bard", "Cleric"];
+const classNames: ClassName[] = ALL_CLASSES;
 
 function buildLongRestSummary(
   logs: Array<{ at: string; classXpAwarded: number; scrollEarned?: string; scrollCount?: number; skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName } }>,

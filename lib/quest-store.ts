@@ -8,6 +8,7 @@ import {
   type SkillCheckResult,
   type OwnedSkill,
   type TaskTag,
+  ALL_CLASSES,
   initClassState,
   getClassLevel,
   rollSkillCheck,
@@ -150,7 +151,7 @@ type QuestStore = {
 
 const milestones = new Set([5, 10, 25, 50]);
 const milestoneXpBonus: Record<number, number> = { 5: 25, 10: 50, 25: 75, 50: 100 };
-const classNames: ClassName[] = ["Wizard", "Fighter", "Rogue", "Bard", "Cleric"];
+const classNames: ClassName[] = ALL_CLASSES;
 
 const isClassName = (value: unknown): value is ClassName =>
   typeof value === "string" && classNames.includes(value as ClassName);
@@ -246,7 +247,7 @@ const createBackupData = (state: QuestStore): QuestBackup => {
 
   return {
     app: "questflow",
-    version: 7,
+    version: 8,
     exportedAt,
     updatedAt: getDerivedUpdatedAt(state) ?? exportedAt,
     tasks: state.tasks,
@@ -612,7 +613,7 @@ export const useQuestStore = create<QuestStore>()(
     {
       name: "questflow-v1",
       storage: createJSONStorage(() => localStorage),
-      version: 7,
+      version: 8,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;
         let data = persisted;
@@ -682,6 +683,19 @@ export const useQuestStore = create<QuestStore>()(
             lastProgressClass: data.lastProgressClass ?? undefined,
             restState: undefined
           };
+        }
+
+        // v7→v8: add 7 new classes (Paladin, Ranger, Druid, Warlock, Sorcerer, Monk, Barbarian)
+        if (version < 8) {
+          if (data.classStates) {
+            const cs = data.classStates as Record<string, unknown>;
+            const newClasses = ["Paladin", "Ranger", "Druid", "Warlock", "Sorcerer", "Monk", "Barbarian"];
+            for (const cn of newClasses) {
+              if (!cs[cn]) {
+                cs[cn] = { xp: 0, scrolls: 0, skills: [], fatigue: 0 };
+              }
+            }
+          }
         }
 
         return data;

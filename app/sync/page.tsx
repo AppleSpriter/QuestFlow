@@ -20,7 +20,7 @@ import {
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type QuestBackup, useQuestStore } from "@/lib/quest-store";
-import { CLASS_META, type ClassName } from "@/data/classes";
+import { ALL_CLASSES, CLASS_META, type ClassName } from "@/data/classes";
 
 type PublicWebDavConfig = {
   url: string;
@@ -179,7 +179,7 @@ export default function SyncPage() {
           title: t.title ?? "Untitled",
           progressCount: t.progressCount ?? 0,
           status: t.status ?? "active",
-          className: (["Wizard", "Fighter", "Rogue", "Bard", "Cleric"].includes(t.className) ? t.className : "Wizard") as ClassName
+          className: (ALL_CLASSES.includes(t.className as ClassName) ? t.className : "Wizard") as ClassName
         }))
       });
     } catch {

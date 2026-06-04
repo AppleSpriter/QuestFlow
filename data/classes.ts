@@ -1,4 +1,4 @@
-export type ClassName = "Wizard" | "Fighter" | "Rogue" | "Bard" | "Cleric";
+export type ClassName = "Wizard" | "Fighter" | "Rogue" | "Bard" | "Cleric" | "Paladin" | "Ranger" | "Druid" | "Warlock" | "Sorcerer" | "Monk" | "Barbarian";
 
 export type SkillLine = {
   id: string;
@@ -106,10 +106,87 @@ export const CLASS_META: Record<ClassName, {
     checkSkills: ["宗教", "医疗", "洞察", "说服"],
     tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
     label: "知识整理"
+  },
+  Paladin: {
+    emoji: "🛡️",
+    color: "text-yellow-700",
+    bgColor: "bg-yellow-50",
+    borderColor: "border-yellow-300",
+    hexColor: "#a16207",
+    scrollName: "誓言卷轴",
+    checkSkills: ["宗教", "说服", "威吓", "洞察"],
+    tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
+    label: "守护承诺"
+  },
+  Ranger: {
+    emoji: "🏹",
+    color: "text-emerald-700",
+    bgColor: "bg-emerald-50",
+    borderColor: "border-emerald-300",
+    hexColor: "#047857",
+    scrollName: "狩猎卷轴",
+    checkSkills: ["生存", "自然", "察觉", "隐匿"],
+    tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
+    label: "目标追踪"
+  },
+  Druid: {
+    emoji: "🌿",
+    color: "text-lime-700",
+    bgColor: "bg-lime-50",
+    borderColor: "border-lime-300",
+    hexColor: "#4d7c0f",
+    scrollName: "自然卷轴",
+    checkSkills: ["自然", "医疗", "动物驯养", "洞察"],
+    tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
+    label: "生态平衡"
+  },
+  Warlock: {
+    emoji: "🕯️",
+    color: "text-fuchsia-700",
+    bgColor: "bg-fuchsia-50",
+    borderColor: "border-fuchsia-300",
+    hexColor: "#a21caf",
+    scrollName: "契约卷轴",
+    checkSkills: ["奥术", "欺瞒", "威吓", "宗教"],
+    tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
+    label: "契约协作"
+  },
+  Sorcerer: {
+    emoji: "🌀",
+    color: "text-orange-700",
+    bgColor: "bg-orange-50",
+    borderColor: "border-orange-300",
+    hexColor: "#c2410c",
+    scrollName: "血脉卷轴",
+    checkSkills: ["奥术", "说服", "洞察", "威吓"],
+    tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
+    label: "天赋直觉"
+  },
+  Monk: {
+    emoji: "🥋",
+    color: "text-teal-700",
+    bgColor: "bg-teal-50",
+    borderColor: "border-teal-300",
+    hexColor: "#0f766e",
+    scrollName: "气脉卷轴",
+    checkSkills: ["运动", "察觉", "洞察", "杂技"],
+    tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
+    label: "自律修炼"
+  },
+  Barbarian: {
+    emoji: "🪓",
+    color: "text-stone-700",
+    bgColor: "bg-stone-50",
+    borderColor: "border-stone-300",
+    hexColor: "#57534e",
+    scrollName: "狂怒卷轴",
+    checkSkills: ["运动", "威吓", "生存", "察觉"],
+    tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
+    label: "全力突破"
   }
 };
 
-export const ALL_CLASSES: ClassName[] = ["Wizard", "Fighter", "Rogue", "Bard", "Cleric"];
+export const ALL_CLASSES: ClassName[] = ["Wizard", "Fighter", "Rogue", "Bard", "Cleric", "Paladin", "Ranger", "Druid", "Warlock", "Sorcerer", "Monk", "Barbarian"];
 
 // ─── Tier system ─────────────────────────────────────────────────
 // Tier n requires 2^(n-1) copies. Max tier = 9 (requires 2^8 = 256 copies).
@@ -197,6 +274,90 @@ export const SKILL_LINES: SkillLine[] = [
     skills: ["庇护术", "援助术", "防护能量", "防死结界", "高等复原术", "英雄宴会", "再生术", "神圣结界", "圣域降世"] },
   { id: "cleric-revive", name: "复活系", class: "Cleric", emoji: "✨",
     skills: ["稳定术", "复苏", "死者复生", "复活术", "真正复活", "灵魂归来", "奇迹复生", "圣灵复活", "完全复活"] },
+
+  // ── Paladin ──
+  { id: "paladin-smite", name: "神圣打击系", class: "Paladin", emoji: "⚡",
+    skills: ["神圣打击", "灼热打击", "雷鸣打击", "烙印打击", "放逐打击", "神圣惩戒", "天界审判", "圣光裁决", "神罚降临"] },
+  { id: "paladin-oath", name: "誓言系", class: "Paladin", emoji: "📜",
+    skills: ["神圣感知", "奉献誓言", "复仇誓言", "古贤誓言", "神圣庇护", "信仰光环", "圣洁誓约", "不灭誓言", "神圣化身"] },
+  { id: "paladin-aura", name: "光环系", class: "Paladin", emoji: "🌟",
+    skills: ["勇气光环", "守护光环", "献身光环", "生命光环", "纯净光环", "神圣光环", "审判光环", "天界光环", "永恒圣域"] },
+  { id: "paladin-heal", name: "治疗系", class: "Paladin", emoji: "💚",
+    skills: ["圣疗", "治疗术", "次级复原术", "驱散魔法", "高等复原术", "群体治疗术", "再生术", "圣灵治疗", "完全复苏"] },
+  { id: "paladin-mount", name: "召唤坐骑系", class: "Paladin", emoji: "🐎",
+    skills: ["召唤坐骑", "强化坐骑", "幻影战马", "天界坐骑", "神圣战马", "飞翼坐骑", "星界坐骑", "审判战骑", "神圣军团"] },
+
+  // ── Ranger ──
+  { id: "ranger-mark", name: "猎人印记系", class: "Ranger", emoji: "🎯",
+    skills: ["猎人印记", "强化印记", "巨像杀手", "破敌印记", "追踪猎杀", "群体标记", "天敌锁定", "终极猎杀", "神射审判"] },
+  { id: "ranger-arrow", name: "箭术系", class: "Ranger", emoji: "🏹",
+    skills: ["荆棘箭雨", "强化箭术", "闪电箭", "多重射击", "迅捷箭雨", "风暴箭幕", "星界箭矢", "穿界箭", "万箭齐发"] },
+  { id: "ranger-trap", name: "陷阱系", class: "Ranger", emoji: "🪤",
+    skills: ["诱捕打击", "荆棘缠绕", "警戒陷阱", "束缚陷阱", "大地牢笼", "猎场封锁", "自然囚笼", "世界根须", "终焉陷阱"] },
+  { id: "ranger-beast", name: "野兽系", class: "Ranger", emoji: "🐺",
+    skills: ["动物交谈", "野兽伙伴", "强化伙伴", "召唤野兽", "群兽协同", "野性盟约", "远古兽魂", "荒野军团", "万兽之王"] },
+  { id: "ranger-survival", name: "生存系", class: "Ranger", emoji: "🌲",
+    skills: ["长足大步", "无踪步", "水上行走", "自由行动", "树跃术", "寻路术", "自然庇护", "荒野化身", "世界漫游者"] },
+
+  // ── Druid ──
+  { id: "druid-wildshape", name: "野性变身系", class: "Druid", emoji: "🐻",
+    skills: ["野性变身", "强化变身", "深境洛斯兽", "枭熊形态", "元素变身", "巨兽形态", "远古兽形", "泰坦形态", "自然化身"] },
+  { id: "druid-plant", name: "植物系", class: "Druid", emoji: "🌱",
+    skills: ["缠绕术", "荆棘生长", "植物滋长", "自然守卫", "树人觉醒", "荆棘屏障", "森林苏生", "世界树根", "自然支配"] },
+  { id: "druid-moon", name: "月亮系", class: "Druid", emoji: "🌙",
+    skills: ["月光术", "月华庇护", "月之光束", "月影步", "月之召唤", "月蚀术", "银月审判", "满月化身", "月神降临"] },
+  { id: "druid-element", name: "元素系", class: "Druid", emoji: "🌩️",
+    skills: ["雷鸣波", "烈焰刀", "召雷术", "冰风暴", "火焰风暴", "石墙术", "风暴复仇", "地震术", "元素灾变"] },
+  { id: "druid-heal", name: "治愈系", class: "Druid", emoji: "💚",
+    skills: ["治疗真言", "治疗术", "次级复原术", "群体治疗术", "高等复原术", "治愈术", "再生术", "群体再生", "自然复苏"] },
+
+  // ── Warlock ──
+  { id: "warlock-blast", name: "魔能爆系", class: "Warlock", emoji: "🕯️",
+    skills: ["魔能爆", "苦痛魔能爆", "推斥魔能爆", "强化魔能爆", "虚空爆裂", "深渊射线", "星界魔能", "旧日凝视", "终末魔能"] },
+  { id: "warlock-pact", name: "契约系", class: "Warlock", emoji: "🤝",
+    skills: ["契约恩赐", "链之契约", "刃之契约", "书之契约", "深化契约", "异界盟约", "远古契约", "永恒契约", "旧日支配"] },
+  { id: "warlock-curse", name: "诅咒系", class: "Warlock", emoji: "🩸",
+    skills: ["巫术诅咒", "厄运术", "吸血鬼之触", "恐惧术", "支配人类", "灵魂囚笼", "死亡宣告", "支配怪物", "终极诅咒"] },
+  { id: "warlock-darkness", name: "黑暗系", class: "Warlock", emoji: "🌑",
+    skills: ["黑暗术", "魔鬼视界", "阴影护甲", "影界步", "饥渴黑暗", "暗影召唤", "虚空之门", "深渊降临", "永夜领域"] },
+  { id: "warlock-summon", name: "召唤系", class: "Warlock", emoji: "👁️",
+    skills: ["魔宠召唤", "迷踪仆役", "恶魔召唤", "次级异界盟友", "异界召唤", "深渊仆从", "旧日化身", "邪神使徒", "远古支配者"] },
+
+  // ── Sorcerer ──
+  { id: "sorcerer-fire", name: "火焰血脉系", class: "Sorcerer", emoji: "🔥",
+    skills: ["火焰箭", "燃烧之手", "灼热射线", "火球术", "火墙术", "焰击术", "延迟爆裂火球", "焚云术", "流星爆"] },
+  { id: "sorcerer-storm", name: "风暴血脉系", class: "Sorcerer", emoji: "⛈️",
+    skills: ["雷鸣波", "闪电束", "召雷术", "风暴球", "连锁闪电", "风行术", "风暴复仇", "天灾雷云", "雷霆化身"] },
+  { id: "sorcerer-dragon", name: "龙脉系", class: "Sorcerer", emoji: "🐉",
+    skills: ["龙息术", "龙鳞护体", "龙威压迫", "龙翼展开", "龙焰爆发", "龙魂觉醒", "远古龙力", "真龙化身", "龙神降临"] },
+  { id: "sorcerer-metamagic", name: "超魔系", class: "Sorcerer", emoji: "✨",
+    skills: ["超魔塑法", "延展法术", "双发法术", "强效法术", "高等超魔", "快速施法", "精准塑能", "奥术爆发", "魔力洪流"] },
+  { id: "sorcerer-chaos", name: "混沌系", class: "Sorcerer", emoji: "🎲",
+    skills: ["混沌箭", "幸运扭曲", "野性魔法", "混乱术", "随机传送", "魔力爆涌", "命运逆转", "现实扭曲", "混沌化身"] },
+
+  // ── Monk ──
+  { id: "monk-qi", name: "气功系", class: "Monk", emoji: "🌀",
+    skills: ["气", "疾风连击", "飞檐走壁", "震慑拳", "金刚魂", "空灵体", "完美自我", "超凡入圣", "天人合一"] },
+  { id: "monk-combo", name: "连击系", class: "Monk", emoji: "👊",
+    skills: ["徒手打击", "疾风连打", "震慑连击", "破防打击", "金刚连击", "神速拳", "千拳乱舞", "无影拳", "万象归一"] },
+  { id: "monk-dodge", name: "闪避系", class: "Monk", emoji: "💨",
+    skills: ["灵巧闪避", "偏斜飞弹", "慢落术", "闪避本能", "空灵闪避", "相位闪避", "不动明王", "命运回避", "完全无我"] },
+  { id: "monk-movement", name: "身法系", class: "Monk", emoji: "🦶",
+    skills: ["踏风步", "轻身术", "水上步", "壁走术", "瞬身步", "空行术", "维度步", "无距步", "神行无踪"] },
+  { id: "monk-mind", name: "心灵系", class: "Monk", emoji: "🧘",
+    skills: ["静心", "净化身心", "宁静术", "心灵护盾", "空性冥想", "真我觉醒", "灵魂坚韧", "超脱轮回", "涅槃"] },
+
+  // ── Barbarian ──
+  { id: "barbarian-rage", name: "狂怒系", class: "Barbarian", emoji: "🪓",
+    skills: ["狂怒", "强化狂怒", "鲁莽攻击", "狂暴打击", "无尽狂怒", "原始怒火", "泰坦狂怒", "灭世狂怒", "战神化身"] },
+  { id: "barbarian-totem", name: "图腾系", class: "Barbarian", emoji: "🐻",
+    skills: ["野性本能", "熊之图腾", "鹰之图腾", "狼之图腾", "灵魂行者", "图腾守护", "远古兽魂", "荒野化身", "万灵之王"] },
+  { id: "barbarian-throw", name: "投掷系", class: "Barbarian", emoji: "🪨",
+    skills: ["投掷", "强力投掷", "狂暴投掷", "巨力投掷", "破甲投掷", "山崩投掷", "陨星投掷", "泰坦掷击", "世界投掷"] },
+  { id: "barbarian-tough", name: "坚韧系", class: "Barbarian", emoji: "🛡️",
+    skills: ["无甲防御", "危险感知", "坚韧体魄", "伤害抗性", "不屈狂暴", "原始韧性", "不灭肉身", "泰坦之躯", "永恒战体"] },
+  { id: "barbarian-shatter", name: "震慑系", class: "Barbarian", emoji: "💥",
+    skills: ["威吓怒吼", "震地猛击", "破胆怒吼", "雷霆践踏", "战争咆哮", "山岳崩裂", "大地震怒", "末日咆哮", "原初毁灭"] }
 ];
 
 // ─── Fatigue system ──────────────────────────────────────────────
@@ -385,13 +546,9 @@ export function getTierLabel(className: ClassName, tier: number): string {
 }
 
 export function initClassState(): Record<ClassName, ClassState> {
-  return {
-    Wizard: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
-    Fighter: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
-    Rogue: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
-    Bard: { xp: 0, scrolls: 0, skills: [], fatigue: 0 },
-    Cleric: { xp: 0, scrolls: 0, skills: [], fatigue: 0 }
-  };
+  return Object.fromEntries(
+    ALL_CLASSES.map((cn) => [cn, { xp: 0, scrolls: 0, skills: [], fatigue: 0 }])
+  ) as unknown as Record<ClassName, ClassState>;
 }
 
 // Keep map regions
@@ -405,10 +562,20 @@ export type MapRegion = {
 
 export const MAP_REGIONS: MapRegion[] = [
   { id: "camp", name: "起点营地", emoji: "⛺", minProgress: 0, maxProgress: 4 },
-  { id: "forest", name: "灵感森林", emoji: "🌲", minProgress: 5, maxProgress: 9 },
-  { id: "canyon", name: "深度峡谷", emoji: "🏔️", minProgress: 10, maxProgress: 24 },
-  { id: "tower", name: "架构高塔", emoji: "🗼", minProgress: 25, maxProgress: 49 },
-  { id: "stars", name: "星辰实验室", emoji: "🌌", minProgress: 50, maxProgress: Infinity }
+  { id: "trail", name: "冒险小径", emoji: "🥾", minProgress: 5, maxProgress: 9 },
+  { id: "forest", name: "灵感森林", emoji: "🌲", minProgress: 10, maxProgress: 19 },
+  { id: "ruins", name: "古代遗迹", emoji: "🏛️", minProgress: 20, maxProgress: 34 },
+  { id: "canyon", name: "深度峡谷", emoji: "🏔️", minProgress: 35, maxProgress: 49 },
+  { id: "swamp", name: "迷雾沼泽", emoji: "🌫️", minProgress: 50, maxProgress: 69 },
+  { id: "tower", name: "架构高塔", emoji: "🗼", minProgress: 70, maxProgress: 89 },
+  { id: "library", name: "秘法图书馆", emoji: "📚", minProgress: 90, maxProgress: 119 },
+  { id: "forge", name: "星火熔炉", emoji: "🔥", minProgress: 120, maxProgress: 149 },
+  { id: "citadel", name: "晨星城塞", emoji: "🏰", minProgress: 150, maxProgress: 199 },
+  { id: "abyss", name: "回声深渊", emoji: "🕳️", minProgress: 200, maxProgress: 249 },
+  { id: "astral", name: "星界航道", emoji: "🌌", minProgress: 250, maxProgress: 349 },
+  { id: "lab", name: "星辰实验室", emoji: "🧪", minProgress: 350, maxProgress: 499 },
+  { id: "throne", name: "命运王座", emoji: "👑", minProgress: 500, maxProgress: 749 },
+  { id: "legend", name: "传奇之门", emoji: "🌠", minProgress: 750, maxProgress: Infinity }
 ];
 
 export function getMapRegion(progressCount: number): MapRegion {
