@@ -105,8 +105,6 @@ const createWindow = async () => {
     title: "QuestFlow",
     backgroundColor: "#f7f0de",
     show: false,
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: { x: 18, y: 18 },
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

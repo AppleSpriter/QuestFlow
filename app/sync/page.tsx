@@ -31,6 +31,12 @@ type Message = {
   text: string;
 };
 
+type OverwriteConfirm = {
+  title: string;
+  description: string;
+  onConfirm: () => void;
+};
+
 type RemoteConflict = {
   remoteText: string;
   remoteUpdatedAt: string;
@@ -115,6 +121,7 @@ export default function SyncPage() {
   const [message, setMessage] = useState<Message | null>(null);
   const [conflict, setConflict] = useState<RemoteConflict | null>(null);
   const [clearConfirm, setClearConfirm] = useState(false);
+  const [overwriteConfirm, setOverwriteConfirm] = useState<OverwriteConfirm | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -180,6 +187,10 @@ export default function SyncPage() {
 
     try {
       const snapshot = getBackupData();
+      if (snapshot.tasks.length === 0 && snapshot.logs.length === 0) {
+        setMessage({ type: "error", text: "本机无数据，无法上传空的存档覆盖云端。" });
+        return false;
+      }
       await postWebDav({ action: "upload", payload: snapshot });
       const syncedAt = new Date().toISOString();
       if (markAsSynced) markSynced(syncedAt);
@@ -267,7 +278,12 @@ export default function SyncPage() {
       const remoteText = await downloadRemoteText();
 
       if (!remoteText) {
-        await postWebDav({ action: "upload", payload: getBackupData() });
+        const local = getBackupData();
+        if (local.tasks.length === 0 && local.logs.length === 0) {
+          setMessage({ type: "info", text: "云端和本地均无存档。" });
+          return;
+        }
+        await postWebDav({ action: "upload", payload: local });
         markSynced(new Date().toISOString());
         setMessage({ type: "success", text: "云端无存档，已上传本机存档作为初始云端版本。" });
         return;
@@ -275,9 +291,19 @@ export default function SyncPage() {
 
       const remoteBackup = parseBackup(remoteText);
       const local = getBackupData();
+      const localIsEmpty = local.tasks.length === 0 && local.logs.length === 0;
       const remoteUpdatedAt = getBackupUpdatedAt(remoteBackup);
       const localTime = new Date(local.updatedAt).getTime();
       const remoteTime = new Date(remoteUpdatedAt).getTime();
+
+      // Fresh install / empty local should never overwrite rich remote data
+      if (localIsEmpty) {
+        const syncedAt = new Date().toISOString();
+        importData(remoteText, { markSyncedAt: syncedAt });
+        setMessage({ type: "success", text: "本机无数据，已从云端下载存档。" });
+        return;
+      }
+
       const lastSyncTime = lastSyncedAt ? new Date(lastSyncedAt).getTime() : 0;
       const localChangedAfterSync = lastSyncTime > 0 && localTime > lastSyncTime;
       const remoteChangedAfterSync = lastSyncTime > 0 && remoteTime > lastSyncTime;
@@ -295,15 +321,28 @@ export default function SyncPage() {
       const syncedAt = new Date().toISOString();
 
       if (remoteTime > localTime) {
-        importData(remoteText, { markSyncedAt: syncedAt });
-        setMessage({ type: "success", text: "云端较新，已下载并应用云端存档。" });
+        setOverwriteConfirm({
+          title: "确认用云端存档覆盖本机？",
+          description: `云端存档（${formatDateTime(remoteUpdatedAt)}）较新，同步后将替换当前本机数据。`,
+          onConfirm: () => {
+            importData(remoteText, { markSyncedAt: new Date().toISOString() });
+            setMessage({ type: "success", text: "云端较新，已下载并应用云端存档。" });
+          }
+        });
         return;
       }
 
       if (localTime > remoteTime) {
-        await postWebDav({ action: "upload", payload: local });
-        markSynced(syncedAt);
-        setMessage({ type: "success", text: "本机较新，已上传本机存档。" });
+        const snapshot = getBackupData();
+        setOverwriteConfirm({
+          title: "确认覆盖云端存档？",
+          description: "本机存档较新，同步后云端旧数据将被本机数据覆盖且无法恢复。",
+          onConfirm: async () => {
+            await postWebDav({ action: "upload", payload: snapshot });
+            markSynced(new Date().toISOString());
+            setMessage({ type: "success", text: "本机较新，已上传本机存档。" });
+          }
+        });
         return;
       }
 
@@ -316,20 +355,32 @@ export default function SyncPage() {
     }
   };
 
-  const resolveConflictWithLocal = async () => {
+  const resolveConflictWithLocal = () => {
     if (!conflict) return;
-    const ok = await uploadLocalToWebDav(true);
-    if (ok) setConflict(null);
+    setOverwriteConfirm({
+      title: "确认使用本机存档覆盖云端？",
+      description: "此操作将上传本机存档并替换云端数据，云端旧存档将无法恢复。",
+      onConfirm: async () => {
+        const ok = await uploadLocalToWebDav(true);
+        if (ok) setConflict(null);
+      }
+    });
   };
 
   const resolveConflictWithRemote = () => {
     if (!conflict) return;
-    const syncedAt = new Date().toISOString();
-    const ok = importData(conflict.remoteText, { markSyncedAt: syncedAt });
-    setConflict(null);
-    setMessage({
-      type: ok ? "success" : "error",
-      text: ok ? "已使用云端存档覆盖本机。" : "云端存档应用失败。"
+    setOverwriteConfirm({
+      title: "确认使用云端存档覆盖本机？",
+      description: "此操作将从云端下载存档并替换本机所有任务、进度和技能，当前本机数据将被覆盖。",
+      onConfirm: () => {
+        const syncedAt = new Date().toISOString();
+        const ok = importData(conflict.remoteText, { markSyncedAt: syncedAt });
+        setConflict(null);
+        setMessage({
+          type: ok ? "success" : "error",
+          text: ok ? "已使用云端存档覆盖本机。" : "云端存档应用失败。"
+        });
+      }
     });
   };
 
@@ -423,6 +474,48 @@ export default function SyncPage() {
                 className="focus-ring flex-1 rounded-lg border border-red-500 bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-700"
               >
                 确认清空
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {overwriteConfirm ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4"
+          onClick={() => setOverwriteConfirm(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-red-200 bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+                <AlertTriangle size={24} className="text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-red-700">{overwriteConfirm.title}</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                {overwriteConfirm.description}
+              </p>
+            </div>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setOverwriteConfirm(null)}
+                className="focus-ring flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const fn = overwriteConfirm.onConfirm;
+                  setOverwriteConfirm(null);
+                  fn();
+                }}
+                className="focus-ring flex-1 rounded-lg border border-red-500 bg-red-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-red-700"
+              >
+                确认覆盖
               </button>
             </div>
           </div>
@@ -555,10 +648,25 @@ export default function SyncPage() {
       <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <PanelTitle icon={<Cloud size={18} />} title="WebDAV 存档" />
         <div className="mt-4 flex flex-wrap gap-2">
-          <ActionButton busy={busy === "webdav-export"} onClick={() => uploadLocalToWebDav(true)} icon={<Upload size={16} />}>
+          <ActionButton busy={busy === "webdav-export"} onClick={() => setOverwriteConfirm({
+            title: "确认覆盖云端存档？",
+            description: "此操作将使用本机存档覆盖 WebDAV 云端存档，云端的旧数据将无法恢复。",
+            onConfirm: () => uploadLocalToWebDav(true)
+          })} icon={<Upload size={16} />}>
             导出到 WebDAV
           </ActionButton>
-          <ActionButton busy={busy === "webdav-import"} onClick={importFromWebDav} icon={<Download size={16} />}>
+          <ActionButton busy={busy === "webdav-import"} onClick={() => {
+            const local = getBackupData();
+            if (local.tasks.length > 0 || local.logs.length > 0) {
+              setOverwriteConfirm({
+                title: "确认用云端存档覆盖本机？",
+                description: "此操作将从 WebDAV 下载云端存档并替换本机所有任务、进度和技能，当前本机数据将被覆盖。",
+                onConfirm: importFromWebDav
+              });
+            } else {
+              importFromWebDav();
+            }
+          }} icon={<Download size={16} />}>
             从 WebDAV 导入
           </ActionButton>
           <ActionButton busy={busy === "webdav-download"} onClick={downloadRemoteBackup} icon={<Download size={16} />}>
