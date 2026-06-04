@@ -48,7 +48,13 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
           exit={{ opacity: 0, y: -10, scale: 0.95 }}
           transition={{ duration: 0.3 }}
         >
-          <div className="rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-lg">
+          <div className={`rounded-xl border px-5 py-3 shadow-lg transition-colors duration-300 ${
+            !rolling && info.check.critical
+              ? "border-amber-400 bg-gradient-to-br from-amber-50 to-white shadow-[0_0_20px_rgba(245,158,11,0.25)]"
+              : !rolling && !info.check.success
+                ? "border-red-200 bg-red-50"
+                : "border-slate-200 bg-white"
+          }`}>
             {/* Dice roll */}
             <div className="flex items-center gap-3">
               <motion.span

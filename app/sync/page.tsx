@@ -5,7 +5,9 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  CircleDot,
   Cloud,
+  CloudOff,
   Database,
   Download,
   RefreshCw,
@@ -18,6 +20,7 @@ import {
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type QuestBackup, useQuestStore } from "@/lib/quest-store";
+import { CLASS_META, type ClassName } from "@/data/classes";
 
 type PublicWebDavConfig = {
   url: string;
@@ -29,6 +32,21 @@ type PublicWebDavConfig = {
 type Message = {
   type: "success" | "error" | "info";
   text: string;
+};
+
+type RemoteTask = {
+  title: string;
+  progressCount: number;
+  status: string;
+  className: ClassName;
+};
+
+type RemoteInfo = {
+  tasks: number;
+  logs: number;
+  totalXp: number;
+  updatedAt: string;
+  taskList: RemoteTask[];
 };
 
 type OverwriteConfirm = {
@@ -119,9 +137,19 @@ export default function SyncPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
+  const messageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showMessage = (msg: Message) => {
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    setMessage(msg);
+    if (msg.type === "success" || msg.type === "info") {
+      messageTimerRef.current = setTimeout(() => setMessage(null), 4000);
+    }
+  };
   const [conflict, setConflict] = useState<RemoteConflict | null>(null);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [overwriteConfirm, setOverwriteConfirm] = useState<OverwriteConfirm | null>(null);
+  const [remoteInfo, setRemoteInfo] = useState<RemoteInfo | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -130,9 +158,38 @@ export default function SyncPage() {
       .then((response) => response.json())
       .then((data: PublicWebDavConfig) => setConfig({ ...emptyConfig, ...data }))
       .catch(() => {
-        setMessage({ type: "error", text: "读取 WebDAV 本机配置失败。" });
+        showMessage({ type: "error", text: "读取 WebDAV 本机配置失败。" });
       });
   }, []);
+
+  const refreshRemoteInfo = async () => {
+    try {
+      const remoteText = await downloadRemoteText();
+      if (!remoteText) {
+        setRemoteInfo(null);
+        return;
+      }
+      const backup = parseBackup(remoteText);
+      setRemoteInfo({
+        tasks: backup.tasks.length,
+        logs: backup.logs.length,
+        totalXp: backup.totalXp ?? 0,
+        updatedAt: getBackupUpdatedAt(backup),
+        taskList: backup.tasks.map((t) => ({
+          title: t.title ?? "Untitled",
+          progressCount: t.progressCount ?? 0,
+          status: t.status ?? "active",
+          className: (["Wizard", "Fighter", "Rogue", "Bard", "Cleric"].includes(t.className) ? t.className : "Wizard") as ClassName
+        }))
+      });
+    } catch {
+      setRemoteInfo(null);
+    }
+  };
+
+  useEffect(() => {
+    if (mounted && config.url) refreshRemoteInfo();
+  }, [mounted, config.url]);
 
   const localBackup = useMemo(() => (mounted ? getBackupData() : null), [mounted, getBackupData, tasks, logs, totalXp, dataUpdatedAt, lastSyncedAt]);
   const localUpdatedAt = localBackup?.updatedAt;
@@ -159,9 +216,9 @@ export default function SyncPage() {
 
       setConfig(data.config);
       setPassword("");
-      setMessage({ type: "success", text: "WebDAV 配置已保存到本机忽略文件。" });
+      showMessage({ type: "success", text: "WebDAV 配置已保存到本机忽略文件。" });
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "保存失败。" });
+      showMessage({ type: "error", text: error instanceof Error ? error.message : "保存失败。" });
     } finally {
       setBusy(null);
     }
@@ -173,9 +230,9 @@ export default function SyncPage() {
 
     try {
       const result = await postWebDav<{ ok: boolean; message: string }>({ action: "test" });
-      setMessage({ type: result.ok ? "success" : "error", text: result.message });
+      showMessage({ type: result.ok ? "success" : "error", text: result.message });
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "连接测试失败。" });
+      showMessage({ type: "error", text: error instanceof Error ? error.message : "连接测试失败。" });
     } finally {
       setBusy(null);
     }
@@ -188,16 +245,17 @@ export default function SyncPage() {
     try {
       const snapshot = getBackupData();
       if (snapshot.tasks.length === 0 && snapshot.logs.length === 0) {
-        setMessage({ type: "error", text: "本机无数据，无法上传空的存档覆盖云端。" });
+        showMessage({ type: "error", text: "本机无数据，无法上传空的存档覆盖云端。" });
         return false;
       }
       await postWebDav({ action: "upload", payload: snapshot });
       const syncedAt = new Date().toISOString();
       if (markAsSynced) markSynced(syncedAt);
-      setMessage({ type: "success", text: "本机存档已导出到 WebDAV。" });
+      refreshRemoteInfo();
+      showMessage({ type: "success", text: "本机存档已导出到 WebDAV。" });
       return true;
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "WebDAV 导出失败。" });
+      showMessage({ type: "error", text: error instanceof Error ? error.message : "WebDAV 导出失败。" });
       return false;
     } finally {
       setBusy(null);
@@ -228,20 +286,21 @@ export default function SyncPage() {
       const remoteText = await downloadRemoteText();
 
       if (!remoteText) {
-        setMessage({ type: "info", text: "WebDAV 上还没有 QuestFlow 存档。" });
+        showMessage({ type: "info", text: "WebDAV 上还没有 QuestFlow 存档。" });
         return false;
       }
 
       parseBackup(remoteText);
       const syncedAt = new Date().toISOString();
       const ok = importData(remoteText, { markSyncedAt: syncedAt });
-      setMessage({
+      refreshRemoteInfo();
+      showMessage({
         type: ok ? "success" : "error",
         text: ok ? "已从 WebDAV 导入云端存档。" : "WebDAV 存档导入失败。"
       });
       return ok;
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "WebDAV 导入失败。" });
+      showMessage({ type: "error", text: error instanceof Error ? error.message : "WebDAV 导入失败。" });
       return false;
     } finally {
       setBusy(null);
@@ -256,14 +315,14 @@ export default function SyncPage() {
       const remoteText = await downloadRemoteText();
 
       if (!remoteText) {
-        setMessage({ type: "info", text: "WebDAV 上还没有 QuestFlow 存档。" });
+        showMessage({ type: "info", text: "WebDAV 上还没有 QuestFlow 存档。" });
         return;
       }
 
       downloadTextFile(remoteText, "questflow-webdav-backup.json");
-      setMessage({ type: "success", text: "已下载云端存档文件。" });
+      showMessage({ type: "success", text: "已下载云端存档文件。" });
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "下载云端存档失败。" });
+      showMessage({ type: "error", text: error instanceof Error ? error.message : "下载云端存档失败。" });
     } finally {
       setBusy(null);
     }
@@ -280,12 +339,13 @@ export default function SyncPage() {
       if (!remoteText) {
         const local = getBackupData();
         if (local.tasks.length === 0 && local.logs.length === 0) {
-          setMessage({ type: "info", text: "云端和本地均无存档。" });
+          showMessage({ type: "info", text: "云端和本地均无存档。" });
           return;
         }
         await postWebDav({ action: "upload", payload: local });
         markSynced(new Date().toISOString());
-        setMessage({ type: "success", text: "云端无存档，已上传本机存档作为初始云端版本。" });
+        refreshRemoteInfo();
+        showMessage({ type: "success", text: "云端无存档，已上传本机存档作为初始云端版本。" });
         return;
       }
 
@@ -300,7 +360,8 @@ export default function SyncPage() {
       if (localIsEmpty) {
         const syncedAt = new Date().toISOString();
         importData(remoteText, { markSyncedAt: syncedAt });
-        setMessage({ type: "success", text: "本机无数据，已从云端下载存档。" });
+        refreshRemoteInfo();
+        showMessage({ type: "success", text: "本机无数据，已从云端下载存档。" });
         return;
       }
 
@@ -314,7 +375,7 @@ export default function SyncPage() {
           remoteUpdatedAt,
           localUpdatedAt: local.updatedAt
         });
-        setMessage({ type: "info", text: "本机和云端都有新改动，请选择保留哪一份存档。" });
+        showMessage({ type: "info", text: "本机和云端都有新改动，请选择保留哪一份存档。" });
         return;
       }
 
@@ -326,7 +387,8 @@ export default function SyncPage() {
           description: `云端存档（${formatDateTime(remoteUpdatedAt)}）较新，同步后将替换当前本机数据。`,
           onConfirm: () => {
             importData(remoteText, { markSyncedAt: new Date().toISOString() });
-            setMessage({ type: "success", text: "云端较新，已下载并应用云端存档。" });
+            refreshRemoteInfo();
+            showMessage({ type: "success", text: "云端较新，已下载并应用云端存档。" });
           }
         });
         return;
@@ -340,16 +402,17 @@ export default function SyncPage() {
           onConfirm: async () => {
             await postWebDav({ action: "upload", payload: snapshot });
             markSynced(new Date().toISOString());
-            setMessage({ type: "success", text: "本机较新，已上传本机存档。" });
+            refreshRemoteInfo();
+            showMessage({ type: "success", text: "本机较新，已上传本机存档。" });
           }
         });
         return;
       }
 
       markSynced(syncedAt);
-      setMessage({ type: "success", text: "本机和云端已经一致。" });
+      showMessage({ type: "success", text: "本机和云端已经一致。" });
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "同步失败。" });
+      showMessage({ type: "error", text: error instanceof Error ? error.message : "同步失败。" });
     } finally {
       setBusy(null);
     }
@@ -376,7 +439,7 @@ export default function SyncPage() {
         const syncedAt = new Date().toISOString();
         const ok = importData(conflict.remoteText, { markSyncedAt: syncedAt });
         setConflict(null);
-        setMessage({
+        showMessage({
           type: ok ? "success" : "error",
           text: ok ? "已使用云端存档覆盖本机。" : "云端存档应用失败。"
         });
@@ -390,11 +453,27 @@ export default function SyncPage() {
 
     const reader = new FileReader();
     reader.onload = (loadEvent) => {
-      const ok = importData(String(loadEvent.target?.result ?? ""));
-      setMessage({
-        type: ok ? "success" : "error",
-        text: ok ? "本地文件导入成功。" : "本地文件导入失败。"
-      });
+      const text = String(loadEvent.target?.result ?? "");
+      const local = getBackupData();
+      if (local.tasks.length > 0 || local.logs.length > 0) {
+        setOverwriteConfirm({
+          title: "确认用本地文件覆盖本机数据？",
+          description: "此操作将使用文件中的存档替换当前本机的所有任务、进度和技能，当前本机数据将被覆盖。",
+          onConfirm: () => {
+            const ok = importData(text);
+            showMessage({
+              type: ok ? "success" : "error",
+              text: ok ? "本地文件导入成功。" : "本地文件导入失败。"
+            });
+          }
+        });
+      } else {
+        const ok = importData(text);
+        showMessage({
+          type: ok ? "success" : "error",
+          text: ok ? "本地文件导入成功。" : "本地文件导入失败。"
+        });
+      }
     };
     reader.readAsText(file);
     event.target.value = "";
@@ -403,7 +482,7 @@ export default function SyncPage() {
   const clearLocalData = () => {
     clearAll();
     setClearConfirm(false);
-    setMessage({ type: "success", text: "本机数据已清空。" });
+    showMessage({ type: "success", text: "本机数据已清空。" });
   };
 
   if (!mounted) {
@@ -433,10 +512,18 @@ export default function SyncPage() {
           </div>
           <p className="mt-1 text-sm text-slate-500">Local backup, WebDAV backup, and last-writer-wins sync.</p>
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:min-w-[410px]">
-          <Metric label="Tasks" value={`${tasks.length}`} />
-          <Metric label="Logs" value={`${logs.length}`} />
-          <Metric label="XP" value={`${totalXp}`} />
+        <div className="flex flex-col gap-2 sm:min-w-[410px]">
+          <div className="grid grid-cols-3 gap-2">
+            <Metric label="Tasks" value={`${tasks.length}`} />
+            <Metric label="Logs" value={`${logs.length}`} />
+            <Metric label="XP" value={`${totalXp}`} />
+          </div>
+          <SyncStatusBadge
+            lastSyncedAt={lastSyncedAt}
+            dataUpdatedAt={dataUpdatedAt}
+            hasWebDavConfig={Boolean(config.url)}
+            remoteInfo={remoteInfo}
+          />
         </div>
       </header>
 
@@ -570,6 +657,25 @@ export default function SyncPage() {
           <div className="mt-4 grid gap-3 text-sm text-slate-600">
             <InfoRow label="本机更新时间" value={formatDateTime(localUpdatedAt)} />
             <InfoRow label="上次同步时间" value={formatDateTime(lastSyncedAt)} />
+            {tasks.length > 0 ? (
+              <div>
+                <div className="mb-2 text-xs font-semibold text-slate-500">本机任务列表</div>
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50">
+                  {tasks.map((task, i) => {
+                    const meta = CLASS_META[task.className];
+                    return (
+                      <div
+                        key={task.id}
+                        className={`flex items-center justify-between px-3 py-1.5 text-sm ${i > 0 ? "border-t border-slate-100" : ""}`}
+                      >
+                        <span style={{ color: meta.hexColor }} className="font-medium truncate mr-2">{meta.emoji} {task.title}</span>
+                        <span className="shrink-0 tabular-nums text-xs text-slate-400">x{task.progressCount}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -647,6 +753,35 @@ export default function SyncPage() {
 
       <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <PanelTitle icon={<Cloud size={18} />} title="WebDAV 存档" />
+        <div className="mt-4 grid gap-3 text-sm text-slate-600">
+          <InfoRow label="云端更新时间" value={remoteInfo ? formatDateTime(remoteInfo.updatedAt) : "未连接"} />
+          {remoteInfo ? (
+            <div className="grid grid-cols-3 gap-2">
+              <Metric label="Tasks" value={`${remoteInfo.tasks}`} />
+              <Metric label="Logs" value={`${remoteInfo.logs}`} />
+              <Metric label="XP" value={`${remoteInfo.totalXp}`} />
+            </div>
+          ) : null}
+          {remoteInfo && remoteInfo.taskList.length > 0 ? (
+            <div>
+              <div className="mb-2 text-xs font-semibold text-slate-500">云端任务列表</div>
+              <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50">
+                {remoteInfo.taskList.map((task, i) => {
+                  const meta = CLASS_META[task.className];
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center justify-between px-3 py-1.5 text-sm ${i > 0 ? "border-t border-slate-100" : ""}`}
+                    >
+                      <span style={{ color: meta.hexColor }} className="font-medium truncate mr-2">{meta.emoji} {task.title}</span>
+                      <span className="shrink-0 tabular-nums text-xs text-slate-400">x{task.progressCount}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <ActionButton busy={busy === "webdav-export"} onClick={() => setOverwriteConfirm({
             title: "确认覆盖云端存档？",
@@ -778,5 +913,55 @@ function ActionButton({
       {busy ? <RefreshCw size={16} className="animate-spin" /> : icon}
       {children}
     </button>
+  );
+}
+
+function SyncStatusBadge({
+  lastSyncedAt,
+  dataUpdatedAt,
+  hasWebDavConfig,
+  remoteInfo
+}: {
+  lastSyncedAt?: string;
+  dataUpdatedAt?: string;
+  hasWebDavConfig: boolean;
+  remoteInfo: RemoteInfo | null;
+}) {
+  if (!hasWebDavConfig) {
+    return (
+      <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-400">
+        <CloudOff size={13} />
+        未配置 WebDAV
+      </div>
+    );
+  }
+
+  if (!lastSyncedAt) {
+    return (
+      <div className="flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs font-medium text-sky-600">
+        <CircleDot size={13} />
+        从未同步
+      </div>
+    );
+  }
+
+  const syncTime = new Date(lastSyncedAt).getTime();
+  const updateTime = dataUpdatedAt ? new Date(dataUpdatedAt).getTime() : 0;
+  const hasPendingChanges = updateTime > syncTime;
+
+  if (hasPendingChanges || !remoteInfo) {
+    return (
+      <div className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700">
+        <AlertTriangle size={13} />
+        待同步
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700">
+      <CheckCircle2 size={13} />
+      已同步
+    </div>
   );
 }

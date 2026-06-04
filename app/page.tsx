@@ -308,8 +308,9 @@ export default function QuestFlowPage() {
   return (
     <motion.main
       className="mx-auto min-h-screen w-full max-w-6xl px-4 py-5 sm:px-6 lg:px-8"
-      animate={{ background: focusBg }}
-      transition={{ duration: 1.2, ease: "easeInOut" }}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0, background: focusBg }}
+      transition={{ duration: 0.5, ease: "easeOut" }}
     >
       <AnimatePresence>
         {focusFlash ? <FocusChangedOverlay /> : null}
@@ -415,7 +416,7 @@ export default function QuestFlowPage() {
         <button
           type="button"
           onClick={() => setShowSpellbook(true)}
-          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100 active:scale-[0.97]"
         >
           <BookOpen size={16} />
           Spellbook
@@ -425,7 +426,7 @@ export default function QuestFlowPage() {
             {restState.type === "short" ? <Coffee size={16} /> : <Tent size={16} />}
             {restState.type === "short" ? "短休中" : "长休中"}
             {restCountdown !== null && (
-              <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold">{Math.floor(restCountdown / 60)}:{String(restCountdown % 60).padStart(2, "0")}</span>
+              <span className="animate-pulse rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold">{Math.floor(restCountdown / 60)}:{String(restCountdown % 60).padStart(2, "0")}</span>
             )}
             <button
               type="button"
@@ -447,7 +448,7 @@ export default function QuestFlowPage() {
             <button
               type="button"
               onClick={startShortRest}
-              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100"
+              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 active:scale-[0.97]"
             >
               <Coffee size={16} />
               短休 {SHORT_REST_MINUTES}min
@@ -455,7 +456,7 @@ export default function QuestFlowPage() {
             <button
               type="button"
               onClick={startLongRest}
-              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 active:scale-[0.97]"
             >
               <Tent size={16} />
               长休 {LONG_REST_MINUTES}min
@@ -465,7 +466,7 @@ export default function QuestFlowPage() {
         <div className="flex-1" />
         <Link
           href="/sync"
-          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100"
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 active:scale-[0.97]"
         >
           <Cloud size={16} />
           同步
@@ -598,12 +599,19 @@ export default function QuestFlowPage() {
                     key={t.id}
                     type="button"
                     onClick={() => changeFocus(t.id)}
-                    className={`inline-flex max-w-[180px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                    className={`inline-flex max-w-[180px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-xs font-semibold transition active:scale-[0.95] ${
                       isCurrent
                         ? "border-slate-950 bg-slate-950 text-white"
-                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                        : "border-slate-200 bg-white hover:bg-slate-100 active:bg-slate-200"
                     }`}
-                    style={isCurrent ? undefined : { color: CLASS_META[tc].hexColor, borderColor: CLASS_META[tc].hexColor + "40" }}
+                    style={
+                      isCurrent
+                        ? undefined
+                        : {
+                            color: CLASS_META[tc].hexColor,
+                            borderColor: CLASS_META[tc].hexColor + "40",
+                          }
+                    }
                   >
                     <span>{CLASS_META[tc].emoji}</span>
                     <span className="truncate">{t.title}</span>
@@ -780,7 +788,7 @@ function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }
               <button
                 type="button"
                 onClick={onProgress}
-                className="focus-ring inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600"
+                className="focus-ring inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 active:scale-[0.97] active:shadow-none"
               >
                 <Zap size={18} />
                 +1 推进一步
@@ -801,13 +809,15 @@ function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }
 }
 
 function ProgressBurst({ result }: { result: ProgressResult }) {
-  const colors = ["#22c55e", "#0ea5e9", "#f59e0b", "#fb7185", "#a78bfa", "#14b8a6"];
+  const taskClass = (result.skillCheck?.className ?? "Wizard") as ClassName;
+  const baseColor = CLASS_META[taskClass].hexColor;
+  const colors = [baseColor, "#22c55e", "#0ea5e9", "#f59e0b", "#fb7185"];
   const particleTypes = ["particle", "particle-star", "particle-diamond", "particle-ring"] as const;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
       {Array.from({ length: 3 }).map((_, i) => (
-        <motion.div key={`glow-${i}`} className="glow-burst" style={{ "--particle-color": colors[i % colors.length] } as CSSProperties}
+        <motion.div key={`glow-${i}`} className="glow-burst" style={{ "--particle-color": baseColor } as CSSProperties}
           initial={{ left: "68%", top: "62%", width: 0, height: 0, opacity: 0.6 }}
           animate={{ width: [0, 120 + i * 40], height: [0, 120 + i * 40], opacity: [0.6, 0], x: [0, -(60 + i * 20)], y: [0, -(60 + i * 20)] }}
           transition={{ duration: 0.7, ease: "easeOut", delay: i * 0.08 }} />
@@ -862,7 +872,8 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
 
   return (
     <motion.article layout animate={isPulsing ? { scale: [1, 1.035, 1], borderColor: ["#dde3eb", "#22c55e", "#dde3eb"] } : { scale: 1 }} whileHover={{ y: -2 }} transition={{ duration: 0.55, ease: "easeOut" }}
-      className={`rounded-lg border bg-white p-4 shadow-sm ${isFocus ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200"}`}>
+      className={`rounded-lg border bg-white p-4 shadow-sm ${isFocus ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200"}`}
+      style={{ borderLeftWidth: "4px", borderLeftColor: CLASS_META[taskClass].hexColor }}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -898,7 +909,7 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
         {task.status !== "archived" ? (
           <>
             <IconButton onClick={onFocus} label="Focus" title="Focus"><Target size={17} /></IconButton>
-            <button type="button" onClick={onProgress} className="focus-ring inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 text-sm font-semibold text-white transition hover:bg-emerald-600">
+            <button type="button" onClick={onProgress} className="focus-ring inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 text-sm font-semibold text-white transition hover:bg-emerald-600 active:scale-[0.97]">
               <Zap size={17} /> +1
             </button>
             <IconButton onClick={() => onStatus(task.status === "paused" ? "active" : "paused")} label={task.status === "paused" ? "Resume" : "Pause"} title="Toggle pause">
@@ -918,7 +929,7 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
 
 function IconButton({ onClick, title, label, children }: { onClick: () => void; title: string; label: string; children: ReactNode }) {
   return (
-    <button type="button" onClick={onClick} className="focus-ring grid min-h-10 min-w-10 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50" title={title} aria-label={label}>
+    <button type="button" onClick={onClick} className="focus-ring grid min-h-10 min-w-10 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.93] active:bg-slate-100" title={title} aria-label={label}>
       {children}
     </button>
   );
@@ -1012,6 +1023,19 @@ function MilestoneOverlay({ result }: { result: ProgressResult }) {
             initial={{ left: "50%", top: "50%", opacity: 1, scale: 0.2, x: 0, y: 0 }}
             animate={{ opacity: 0, scale: [0.2, 1.6, 0.5], x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, rotate: [0, 360] }}
             transition={{ duration: 1.3, ease: "easeOut" }} />
+        );
+      })}
+      {/* Confetti rain falling from top */}
+      {Array.from({ length: 20 }).map((_, i) => {
+        const startX = 10 + (i / 20) * 80;
+        const drift = ((i % 7) - 3) * 25;
+        const shapes = ["particle", "particle-star", "particle-diamond", "particle-ring"] as const;
+        return (
+          <motion.span key={`confetti-${i}`} className={shapes[i % shapes.length]}
+            style={{ "--particle-color": colors[i % colors.length] } as CSSProperties}
+            initial={{ left: `${startX}%`, top: "-5%", opacity: 1, scale: 0.6 + (i % 4) * 0.15, rotate: 0 }}
+            animate={{ top: "110%", opacity: [1, 1, 0.8, 0], x: drift, rotate: [0, 360 * (i % 2 === 0 ? 1 : -1)] }}
+            transition={{ duration: 2.2 + (i % 5) * 0.15, ease: "linear", delay: 0.4 + (i % 8) * 0.06 }} />
         );
       })}
       <motion.div className="rounded-2xl border-2 border-amber-200 bg-white px-8 py-6 text-center shadow-lift"
