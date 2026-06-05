@@ -37,15 +37,27 @@ import {
   calculateProgressReward
 } from "@/lib/progress-rewards";
 import {
+  FEAT_DEFINITIONS,
+  FEAT_MAP,
   type FeatState,
   type OwnedFeat,
   type PendingFeatChoice,
-  FEAT_MAP,
   createInitialFeatState,
-  getFeatPointsForXp,
-  hasFeat,
-  refreshPendingFeatChoices
+  refreshPendingFeatChoices,
+  hasFeat
 } from "@/data/feats";
+
+const localStorageProvider = () => {
+  if (typeof window === "undefined") {
+    return {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => undefined
+    };
+  }
+  return window.localStorage;
+};
+
 
 export type QuestStatus = "active" | "paused" | "archived";
 export type ProgressLogType = "progress" | "scroll";
@@ -1117,7 +1129,7 @@ export const useQuestStore = create<QuestStore>()(
     }),
     {
       name: "questflow-v1",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(localStorageProvider),
       version: QUESTFLOW_BACKUP_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;

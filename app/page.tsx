@@ -187,6 +187,7 @@ export default function QuestFlowPage() {
   const [lastProgress, setLastProgress] = useState<ProgressResult | null>(null);
   const [pulseTaskId, setPulseTaskId] = useState<string | null>(null);
   const [focusFlash, setFocusFlash] = useState(false);
+  const [createdQuestTitle, setCreatedQuestTitle] = useState<string | null>(null);
   const [celebration, setCelebration] = useState<ProgressResult | null>(null);
   const [skillCheckInfo, setSkillCheckInfo] = useState<SkillCheckInfo | null>(null);
   const progressQueueRef = useRef<ProgressResult[]>([]);
@@ -299,11 +300,14 @@ export default function QuestFlowPage() {
   }, [classStates, focusTask?.className, lastProgressClass, showAllClasses]);
 
   const createQuest = () => {
-    const newTaskId = addTask(title, selectedClass, selectedTags);
+    const questTitle = title.trim();
+    const newTaskId = addTask(questTitle, selectedClass, selectedTags);
     if (!newTaskId) return;
     setTitle("");
     setSelectedTags([]);
     setStatusFilter("active");
+    setCreatedQuestTitle(questTitle);
+    setTimeout(() => setCreatedQuestTitle(null), 1400);
     if (!focusTaskId) {
       setFocusFlash(true);
       setTimeout(() => setFocusFlash(false), 320);
@@ -449,6 +453,7 @@ export default function QuestFlowPage() {
     >
       <AnimatePresence>
         {focusFlash ? <FocusChangedOverlay key="focus-flash" /> : null}
+        {createdQuestTitle ? <QuestCreatedOverlay key={createdQuestTitle} title={createdQuestTitle} /> : null}
         {celebration ? <MilestoneOverlay key={`milestone-${celebration.taskId}-${celebration.progressCount}`} result={celebration} /> : null}
         {normalResonance ? <NormalResonanceEffect key={`normal-resonance-${normalResonance.key}-${normalResonance.triggerCount}`} resonance={normalResonance} /> : null}
         {newResonance ? <NewResonanceModal key={`new-resonance-${newResonance.key}`} resonance={newResonance} discoveredCount={Object.keys(useQuestStore.getState().discoveredResonances).length} onClose={() => setNewResonance(null)} /> : null}
@@ -1656,6 +1661,16 @@ function FocusChangedOverlay() {
     <motion.div className="pointer-events-none fixed inset-x-0 top-20 z-50 mx-auto flex w-fit items-center gap-2 rounded-lg border border-sky-200 bg-white px-4 py-3 text-sm font-semibold text-sky-700 shadow-lift"
       initial={{ opacity: 0, y: -18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -18, scale: 0.96 }} transition={{ duration: 0.18 }}>
       <Target size={17} /> Focus Changed
+    </motion.div>
+  );
+}
+
+function QuestCreatedOverlay({ title }: { title: string }) {
+  return (
+    <motion.div className="pointer-events-none fixed inset-x-0 top-32 z-50 mx-auto flex w-fit max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lift"
+      initial={{ opacity: 0, y: -18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -18, scale: 0.96 }} transition={{ duration: 0.18 }}>
+      <CheckCircle2 size={17} />
+      <span className="min-w-0 truncate">Quest Created · {title}</span>
     </motion.div>
   );
 }
