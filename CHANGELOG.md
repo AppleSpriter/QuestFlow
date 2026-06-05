@@ -20,13 +20,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - 新增共鸣连锁：连续切换不同职业累计链数，达到 x5 额外奖励卷轴 ×1
 - 新增首次发现共鸣弹窗和普通共鸣 1 秒轻量触发动画
 - 新增 15 阶段任务地图，从起点营地推进到传奇之门
+- 新增每个任务独立 Todo List，完成待办会自动推进 Progress 并记录待办标题
 
 ### Changed
 
 - 主页职业状态区、创建任务、长休总结、同步页云端任务列表支持 12 职业
 - 共鸣取代旧的简单队伍协同奖励，奖励更细分并可持续成长
 - 任务地图背景跟随新增区域扩展，长期任务推进更有探索感
-- README、AGENTS 文档同步更新为 v1.7 / persist v11
+- README、AGENTS 文档同步更新为 v1.7 / persist v12
 - 长休总结改为按 `ProgressLog.className` 精确统计职业进度，卷轴使用会记录技能事件日志
 - 推进奖励计算抽离为纯函数，便于后续平衡调整和测试
 
@@ -34,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 - 数据迁移至 v10：自动补齐新增职业状态、共鸣图鉴、共鸣 Buff、共鸣链状态
 - 数据迁移至 v11：为历史日志补齐 `type` 与 `className`
+- 数据迁移至 v12：为任务补齐独立 Todo List，并为待办推进日志记录 `todoId` / `todoTitle`
 - WebDAV 空本地存档不会再覆盖已有云端存档，并在替换本地/云端前增加二次确认
 
 ## v1.6 - 2026-05

@@ -37,6 +37,13 @@ import {
 export type QuestStatus = "active" | "paused" | "archived";
 export type ProgressLogType = "progress" | "scroll";
 
+export type QuestTodoItem = {
+  id: string;
+  title: string;
+  completedAt?: string;
+  createdAt: string;
+};
+
 export type QuestTask = {
   id: string;
   title: string;
@@ -44,6 +51,7 @@ export type QuestTask = {
   status: QuestStatus;
   className: ClassName;
   tags: TaskTag[];
+  todos: QuestTodoItem[];
   createdAt: string;
   updatedAt: string;
   lastFocusedAt?: string;
@@ -70,6 +78,8 @@ export type ProgressLog = {
   resonanceKey?: string;
   resonanceName?: string;
   resonanceReward?: string;
+  todoId?: string;
+  todoTitle?: string;
 };
 
 export type ProgressResult = {
@@ -161,7 +171,9 @@ type QuestStore = {
   addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
-  progressTask: (taskId: string, note?: string) => ProgressResult | null;
+  addTaskTodo: (taskId: string, title: string) => string | null;
+  toggleTaskTodo: (taskId: string, todoId: string) => ProgressResult | null;
+  progressTask: (taskId: string, note?: string, todo?: QuestTodoItem) => ProgressResult | null;
   useScroll: (className: ClassName) => { lineId: string; isNew: boolean; upgraded: boolean; fromTier: number; toTier: number } | null;
   startShortRest: () => void;
   startLongRest: () => void;
@@ -175,8 +187,8 @@ type QuestStore = {
 };
 
 const classNames: ClassName[] = ALL_CLASSES;
-export const QUESTFLOW_BACKUP_VERSION = 11;
-export const QUESTFLOW_COMPATIBILITY_VERSION = 11;
+export const QUESTFLOW_BACKUP_VERSION = 12;
+export const QUESTFLOW_COMPATIBILITY_VERSION = 12;
 
 const getSkillLineIds = () => new Set(SKILL_LINES.map((line) => line.id));
 
@@ -225,6 +237,30 @@ const makeId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const normalizeTodos = (todos: unknown): QuestTodoItem[] => {
+  if (!Array.isArray(todos)) return [];
+
+  return todos.reduce<QuestTodoItem[]>((items, todo) => {
+    const item = todo as Partial<QuestTodoItem>;
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    if (!title) return items;
+
+    const createdAt = typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString();
+    const normalized: QuestTodoItem = {
+      id: typeof item.id === "string" ? item.id : makeId(),
+      title,
+      createdAt
+    };
+
+    if (typeof item.completedAt === "string") {
+      normalized.completedAt = item.completedAt;
+    }
+
+    items.push(normalized);
+    return items;
+  }, []);
+};
+
 const normalizeTasks = (tasks: unknown): QuestTask[] => {
   if (!Array.isArray(tasks)) return [];
 
@@ -246,6 +282,7 @@ const normalizeTasks = (tasks: unknown): QuestTask[] => {
       status: item.status === "paused" || item.status === "archived" ? item.status : "active",
       className: isClassName(item.className) ? item.className : "Wizard",
       tags: Array.isArray(item.tags) ? item.tags.filter((t: string) => t === "important" || t === "urgent") as TaskTag[] : [],
+      todos: normalizeTodos(item.todos),
       createdAt,
       updatedAt,
       lastFocusedAt: typeof item.lastFocusedAt === "string" ? item.lastFocusedAt : undefined
@@ -305,7 +342,9 @@ const normalizeLogs = (logs: unknown, tasks: QuestTask[] = []): ProgressLog[] =>
       synergyBonus: typeof item.synergyBonus === "boolean" ? item.synergyBonus : undefined,
       resonanceKey: typeof item.resonanceKey === "string" ? item.resonanceKey : undefined,
       resonanceName: typeof item.resonanceName === "string" ? item.resonanceName : undefined,
-      resonanceReward: typeof item.resonanceReward === "string" ? item.resonanceReward : undefined
+      resonanceReward: typeof item.resonanceReward === "string" ? item.resonanceReward : undefined,
+      todoId: typeof item.todoId === "string" ? item.todoId : undefined,
+      todoTitle: typeof item.todoTitle === "string" ? item.todoTitle : undefined
     };
   });
 };
@@ -430,6 +469,7 @@ export const useQuestStore = create<QuestStore>()(
           status: "active",
           className,
           tags,
+          todos: [],
           createdAt: now,
           updatedAt: now,
           lastFocusedAt: now
@@ -467,7 +507,52 @@ export const useQuestStore = create<QuestStore>()(
         });
       },
 
-      progressTask: (taskId, rawNote) => {
+      addTaskTodo: (taskId, rawTitle) => {
+        const title = rawTitle.trim();
+        if (!title) return null;
+        const now = new Date().toISOString();
+        const todo: QuestTodoItem = { id: makeId(), title, createdAt: now };
+        let created = false;
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.id !== taskId) return task;
+            created = true;
+            return { ...task, todos: [todo, ...task.todos], updatedAt: now };
+          }),
+          dataUpdatedAt: created ? now : state.dataUpdatedAt
+        }));
+        return created ? todo.id : null;
+      },
+
+      toggleTaskTodo: (taskId, todoId) => {
+        const state = get();
+        const task = state.tasks.find((item) => item.id === taskId);
+        const todo = task?.todos.find((item) => item.id === todoId);
+        if (!task || !todo) return null;
+
+        if (!todo.completedAt) {
+          return get().progressTask(taskId, todo.title, todo);
+        }
+
+        const now = new Date().toISOString();
+        set({
+          tasks: state.tasks.map((item) =>
+            item.id === taskId
+              ? {
+                  ...item,
+                  todos: item.todos.map((candidate) =>
+                    candidate.id === todoId ? { ...candidate, completedAt: undefined } : candidate
+                  ),
+                  updatedAt: now
+                }
+              : item
+          ),
+          dataUpdatedAt: now
+        });
+        return null;
+      },
+
+      progressTask: (taskId, rawNote, completedTodo) => {
         const state = get();
         const task = state.tasks.find((item) => item.id === taskId);
         if (!task || task.status === "archived") return null;
@@ -561,7 +646,9 @@ export const useQuestStore = create<QuestStore>()(
           synergyBonus: synergyActive,
           resonanceKey: resonance?.key,
           resonanceName: resonance?.name,
-          resonanceReward: resonance?.reward.label
+          resonanceReward: resonance?.reward.label,
+          todoId: completedTodo?.id,
+          todoTitle: completedTodo?.title
         };
 
         // Update class XP, scrolls and fatigue
@@ -592,6 +679,11 @@ export const useQuestStore = create<QuestStore>()(
                   className: taskClassName,
                   status: item.status === "paused" ? "active" : item.status,
                   progressCount,
+                  todos: completedTodo
+                    ? item.todos.map((todo) =>
+                        todo.id === completedTodo.id ? { ...todo, completedAt: at } : todo
+                      )
+                    : item.todos,
                   updatedAt: at
                 }
               : item
@@ -926,6 +1018,16 @@ export const useQuestStore = create<QuestStore>()(
 
         // v10→v11: add log type/className so summaries and skill events are exact.
         if (version < 11) {
+          const tasks = normalizeTasks(data.tasks);
+          data = {
+            ...data,
+            tasks,
+            logs: normalizeLogs(data.logs, tasks)
+          };
+        }
+
+        // v11→v12: add per-task todo lists and todo attribution on progress logs.
+        if (version < 12) {
           const tasks = normalizeTasks(data.tasks);
           data = {
             ...data,

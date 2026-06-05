@@ -2,5 +2,5 @@
   "url": "https://example.com/remote.php/dav/files/username/",
   "username": "username",
   "password": "password",
-  "filePath": "questflow/questflow-backup-v11.json"
+  "filePath": "questflow/questflow-backup-v12.json"
 }

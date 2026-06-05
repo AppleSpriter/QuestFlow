@@ -6,11 +6,14 @@ import Link from "next/link";
 import {
   Archive,
   BookOpen,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Circle,
   Cloud,
   Coffee,
+  EyeOff,
   Flame,
   Pause,
   Play,
@@ -28,6 +31,7 @@ import {
   getLevelProgress,
   type ProgressLog,
   type ProgressResult,
+  type QuestTodoItem,
   type QuestStatus,
   type QuestTask,
   type RestState,
@@ -160,6 +164,8 @@ export default function QuestFlowPage() {
   const addTask = useQuestStore((state) => state.addTask);
   const setFocusTask = useQuestStore((state) => state.setFocusTask);
   const updateTaskStatus = useQuestStore((state) => state.updateTaskStatus);
+  const addTaskTodo = useQuestStore((state) => state.addTaskTodo);
+  const toggleTaskTodo = useQuestStore((state) => state.toggleTaskTodo);
   const progressTask = useQuestStore((state) => state.progressTask);
 
   const [mounted, setMounted] = useState(false);
@@ -184,6 +190,8 @@ export default function QuestFlowPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showPartyStatus, setShowPartyStatus] = useState(true);
   const [showAllClasses, setShowAllClasses] = useState(false);
+  const [todoTitle, setTodoTitle] = useState("");
+  const [showCompletedTodos, setShowCompletedTodos] = useState(false);
   const [newResonance, setNewResonance] = useState<ResonanceTrigger | null>(null);
   const [normalResonance, setNormalResonance] = useState<ResonanceTrigger | null>(null);
   const normalResonanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -326,8 +334,7 @@ export default function QuestFlowPage() {
     playNextProgress();
   }, [playNextProgress]);
 
-  const pushProgress = useCallback((taskId: string, note?: string) => {
-    const result = progressTask(taskId, note);
+  const handleProgressResult = useCallback((result: ProgressResult | null) => {
     if (!result) return;
 
     enqueueProgress(result);
@@ -354,12 +361,32 @@ export default function QuestFlowPage() {
         resonanceReward: result.resonance?.reward.label
       });
     }
-  }, [enqueueProgress, enqueueSkillCheck, progressTask]);
+  }, [enqueueProgress, enqueueSkillCheck]);
+
+  const pushProgress = useCallback((taskId: string, note?: string) => {
+    handleProgressResult(progressTask(taskId, note));
+  }, [handleProgressResult, progressTask]);
 
   const pushFocusProgress = () => {
     if (!focusTask) return;
     pushProgress(focusTask.id, progressNote);
     setProgressNote("");
+  };
+
+  const createFocusTodo = () => {
+    if (!focusTask) return;
+    const createdId = addTaskTodo(focusTask.id, todoTitle);
+    if (createdId) setTodoTitle("");
+  };
+
+  const submitFocusTodo = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    createFocusTodo();
+  };
+
+  const completeFocusTodo = (todoId: string) => {
+    if (!focusTask) return;
+    handleProgressResult(toggleTaskTodo(focusTask.id, todoId));
   };
 
   if (!mounted) {
@@ -786,7 +813,17 @@ export default function QuestFlowPage() {
           </section>
         </section>
 
-        <aside className="min-w-0">
+        <aside className="min-w-0 space-y-4">
+          <FocusTodoPanel
+            task={focusTask}
+            title={todoTitle}
+            setTitle={setTodoTitle}
+            showCompleted={showCompletedTodos}
+            setShowCompleted={setShowCompletedTodos}
+            onSubmit={submitFocusTodo}
+            onCreate={createFocusTodo}
+            onToggle={completeFocusTodo}
+          />
           <ProgressLogPanel logs={focusLogs} task={focusTask} />
         </aside>
       </div>
@@ -1122,6 +1159,113 @@ function IconButton({ onClick, title, label, children }: IconButtonProps) {
   );
 }
 
+type FocusTodoPanelProps = {
+  task?: QuestTask;
+  title: string;
+  setTitle: (title: string) => void;
+  showCompleted: boolean;
+  setShowCompleted: (showCompleted: boolean) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCreate: () => void;
+  onToggle: (todoId: string) => void;
+};
+
+function FocusTodoPanel({
+  task,
+  title,
+  setTitle,
+  showCompleted,
+  setShowCompleted,
+  onSubmit,
+  onCreate,
+  onToggle,
+}: FocusTodoPanelProps) {
+  const todos = task?.todos ?? [];
+  const openTodos = todos.filter((todo) => !todo.completedAt);
+  const completedTodos = todos.filter((todo) => todo.completedAt);
+  const visibleCompleted = showCompleted ? completedTodos : [];
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-950">Todo List</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            {task ? `当前任务下的具体待办 · ${openTodos.length} 未完成` : "选择任务后添加待办"}
+          </p>
+        </div>
+        {completedTodos.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowCompleted(!showCompleted)}
+            className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+          >
+            {showCompleted ? <ChevronUp size={14} /> : <EyeOff size={14} />}
+            {showCompleted ? "折叠完成" : `完成 ${completedTodos.length}`}
+          </button>
+        ) : null}
+      </div>
+
+      {task ? (
+        <>
+          <form onSubmit={onSubmit} className="mb-4 flex gap-2">
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="新增这个任务下的 Todo"
+              className="focus-ring min-h-10 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-950 placeholder:text-slate-400"
+            />
+            <button
+              type="button"
+              onClick={onCreate}
+              disabled={!title.trim()}
+              className="focus-ring inline-flex min-h-10 items-center justify-center rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40"
+            >
+              <Plus size={16} />
+            </button>
+          </form>
+
+          {openTodos.length + visibleCompleted.length > 0 ? (
+            <div className="space-y-2">
+              {[...openTodos, ...visibleCompleted].map((todo) => {
+                const completed = Boolean(todo.completedAt);
+                return (
+                  <motion.button
+                    key={todo.id}
+                    type="button"
+                    layout
+                    onClick={() => onToggle(todo.id)}
+                    className={`focus-ring flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${
+                      completed
+                        ? "border-slate-200 bg-slate-50 text-slate-400 line-through"
+                        : "border-emerald-200 bg-emerald-50/70 text-slate-800 hover:bg-emerald-100"
+                    }`}
+                  >
+                    {completed ? (
+                      <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-slate-400" />
+                    ) : (
+                      <Circle size={17} className="mt-0.5 shrink-0 text-emerald-600" />
+                    )}
+                    <span className="min-w-0 flex-1 break-words">{todo.title}</span>
+                  </motion.button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+              还没有待办，把任务拆成下一步行动吧
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+          创建或选择一个 Quest 后可添加 Todo
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ProgressLogPanel({ logs, task }: { logs: ProgressLog[]; task?: QuestTask }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
@@ -1155,6 +1299,11 @@ function ProgressLogPanel({ logs, task }: { logs: ProgressLog[]; task?: QuestTas
                   </span>
                 </div>
               </div>
+              {log.todoTitle ? (
+                <div className="mt-1 text-xs font-semibold text-emerald-700">
+                  ✅ Todo 完成：{log.todoTitle}
+                </div>
+              ) : null}
               {log.skillCheck && (
                 <div className="mt-1 flex items-center gap-1 text-xs">
                   <span>🎲</span>
@@ -1231,10 +1380,10 @@ function NormalResonanceEffect({ resonance }: { resonance: ResonanceTrigger }) {
   const [firstClass, secondClass] = resonance.classes;
   return (
     <motion.div
-      className="pointer-events-none fixed right-5 top-24 z-40 w-72 rounded-3xl border border-purple-200 bg-white/95 p-4 shadow-2xl backdrop-blur will-change-transform"
-      initial={{ opacity: 0, x: 36, scale: 0.96 }}
-      animate={{ opacity: 1, x: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 28, scale: 0.98 }}
+      className="pointer-events-none fixed inset-x-0 bottom-8 z-40 mx-auto w-72 rounded-3xl border border-purple-200 bg-white/95 p-4 shadow-2xl backdrop-blur will-change-transform"
+      initial={{ opacity: 0, y: 28, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 24, scale: 0.98 }}
       transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
     >
       <motion.div

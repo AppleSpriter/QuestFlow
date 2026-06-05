@@ -66,13 +66,13 @@ package.json               -- Scripts, npm package version, electron-builder con
 - Zustand `persist` middleware + `createJSONStorage(() => localStorage)`
 - WebDAV sync available via `/api/webdav` proxy and `/sync` config page
 - WebDAV config is resolved server-side in `lib/server/webdav-config.ts`; do not store credentials in Zustand/browser state.
-- **Persist version: 11** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11)
+- **Persist version: 12** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12)
 
-### Store Schema (v11)
+### Store Schema (v12)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| tasks | QuestTask[] | All tasks: id, title, progressCount, status, className, tags, timestamps |
+| tasks | QuestTask[] | All tasks: id, title, progressCount, status, className, tags, per-task todos, timestamps |
 | logs | ProgressLog[] | Progress/scroll history: type, className, note, XP, skillCheck, scroll changes, skill events, fatigue, resonance |
 | focusTaskId | string \| undefined | Currently focused task ID |
 | totalXp | number | Total XP across all classes |
@@ -106,6 +106,7 @@ type QuestTask = {
   status: QuestStatus;     // "active" | "paused" | "archived"
   className: ClassName;
   tags: TaskTag[];          // "important" | "urgent"
+  todos: QuestTodoItem[];   // task-level checklist; completing one triggers progress
   createdAt: string;
   updatedAt: string;
   lastFocusedAt?: string;
@@ -132,6 +133,8 @@ type ProgressLog = {
   resonanceKey?: string;
   resonanceName?: string;
   resonanceReward?: string;
+  todoId?: string;
+  todoTitle?: string;
 }
 
 type DiscoveredResonance = {
@@ -161,7 +164,7 @@ type RestState = {
 
 ### Backup Contract
 
-- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `11`.
+- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `12`.
 - `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, and resonance chain.
 - `updatedAt` is derived from `dataUpdatedAt`, task `updatedAt`, and log `at` so WebDAV conflict checks can compare local vs remote freshness.
 - `importData()` normalizes tasks and class states before writing to Zustand; use it for local file import and WebDAV restore instead of manually assigning persisted data.
@@ -350,6 +353,7 @@ Zustand persist `version: 11`, `migrate` function handles:
 - **v8→v9**: Add resonance collection and pending resonance buffs
 - **v9→v10**: Add resonance chain state
 - **v10→v11**: Add `ProgressLog.type` and `ProgressLog.className`; scroll use now writes skill event logs
+- **v11→v12**: Add per-task `QuestTodoItem[]`; completed todos store `todoId`/`todoTitle` on progress logs
 
 ## Key Conventions
 
