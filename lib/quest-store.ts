@@ -24,6 +24,7 @@ import {
   type DiscoveredResonance,
   type ResonanceBuffs,
   type ResonanceChainState,
+  type ResonanceRewardType,
   type ResonanceTrigger,
   RESONANCE_MAP,
   createInitialResonanceBuffs,
@@ -31,8 +32,20 @@ import {
   getResonanceLevel
 } from "@/data/resonance";
 import {
+  RESONANCE_FATIGUE_RECOVERY,
+  RESONANCE_XP_BONUS,
   calculateProgressReward
 } from "@/lib/progress-rewards";
+import {
+  type FeatState,
+  type OwnedFeat,
+  type PendingFeatChoice,
+  FEAT_MAP,
+  createInitialFeatState,
+  getFeatPointsForXp,
+  hasFeat,
+  refreshPendingFeatChoices
+} from "@/data/feats";
 
 export type QuestStatus = "active" | "paused" | "archived";
 export type ProgressLogType = "progress" | "scroll";
@@ -149,6 +162,7 @@ export type QuestBackup = {
   discoveredResonances?: Record<string, DiscoveredResonance>;
   resonanceBuffs?: ResonanceBuffs;
   resonanceChain?: ResonanceChainState;
+  featState?: FeatState;
 };
 
 type QuestStore = {
@@ -168,6 +182,7 @@ type QuestStore = {
   discoveredResonances: Record<string, DiscoveredResonance>;
   resonanceBuffs: ResonanceBuffs;
   resonanceChain: ResonanceChainState;
+  featState: FeatState;
   addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
@@ -179,6 +194,7 @@ type QuestStore = {
   startLongRest: () => void;
   completeRest: () => void;
   cancelRest: () => void;
+  chooseFeat: (choiceId: string, featId: string) => boolean;
   getBackupData: () => QuestBackup;
   exportData: () => void;
   importData: (jsonString: string, options?: { markSyncedAt?: string }) => boolean;
@@ -187,10 +203,24 @@ type QuestStore = {
 };
 
 const classNames: ClassName[] = ALL_CLASSES;
-export const QUESTFLOW_BACKUP_VERSION = 12;
-export const QUESTFLOW_COMPATIBILITY_VERSION = 12;
+export const QUESTFLOW_BACKUP_VERSION = 13;
+export const QUESTFLOW_COMPATIBILITY_VERSION = 13;
 
 const getSkillLineIds = () => new Set(SKILL_LINES.map((line) => line.id));
+
+const addResonanceReward = (
+  rewardType: ResonanceRewardType,
+  nextResonanceBuffs: ResonanceBuffs,
+  rewardBonuses: { xp: number; scrolls: number; fatigueRecovery: number }
+) => {
+  if (rewardType === "xp") rewardBonuses.xp += RESONANCE_XP_BONUS;
+  if (rewardType === "scroll") rewardBonuses.scrolls += 1;
+  if (rewardType === "fatigue") rewardBonuses.fatigueRecovery += RESONANCE_FATIGUE_RECOVERY;
+  if (rewardType === "advantage") nextResonanceBuffs.advantageChecks += 1;
+  if (rewardType === "lucky") nextResonanceBuffs.luckyChecks += 1;
+  if (rewardType === "doubleScroll") nextResonanceBuffs.doubleScrolls += 1;
+  if (rewardType === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
+};
 
 const normalizeClassStates = (classStates: unknown): Record<ClassName, ClassState> => {
   const initial = initClassState();
@@ -229,6 +259,53 @@ const normalizeClassStates = (classStates: unknown): Record<ClassName, ClassStat
 
 const isClassName = (value: unknown): value is ClassName =>
   typeof value === "string" && classNames.includes(value as ClassName);
+
+const normalizeFeatState = (featState: unknown): FeatState => {
+  const initial = createInitialFeatState();
+  if (!featState || typeof featState !== "object") return initial;
+
+  const source = featState as Partial<FeatState>;
+  const owned = Array.isArray(source.owned)
+    ? source.owned.reduce<OwnedFeat[]>((items, feat) => {
+        const item = feat as Partial<OwnedFeat>;
+        if (!item.id || !FEAT_MAP[item.id] || !isClassName(item.className)) return items;
+        items.push({
+          id: item.id,
+          className: item.className,
+          selectedAt: typeof item.selectedAt === "string" ? item.selectedAt : new Date().toISOString(),
+          level: Math.max(4, Math.floor(Number(item.level) || 4))
+        });
+        return items;
+      }, [])
+    : [];
+  const selectedIds = new Set(owned.map((feat) => feat.id));
+  const pending = Array.isArray(source.pending)
+    ? source.pending.reduce<PendingFeatChoice[]>((items, choice) => {
+        const item = choice as Partial<PendingFeatChoice>;
+        const choices = Array.isArray(item.choices)
+          ? item.choices.filter((id): id is string => typeof id === "string" && !!FEAT_MAP[id] && !selectedIds.has(id)).slice(0, 3)
+          : [];
+        if (!item.id || !isClassName(item.className) || choices.length === 0) return items;
+        items.push({
+          id: item.id,
+          className: item.className,
+          pointIndex: Math.max(1, Math.floor(Number(item.pointIndex) || 1)),
+          level: Math.max(4, Math.floor(Number(item.level) || 4)),
+          choices,
+          createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString()
+        });
+        return items;
+      }, [])
+    : [];
+
+  return {
+    owned,
+    pending,
+    dailyAdvantageUsedAt: typeof source.dailyAdvantageUsedAt === "string" ? source.dailyAdvantageUsedAt : undefined,
+    shortRestCount: Math.max(0, Math.floor(Number(source.shortRestCount) || 0)),
+    longRestCount: Math.max(0, Math.floor(Number(source.longRestCount) || 0))
+  };
+};
 
 const makeId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -421,7 +498,8 @@ const createBackupData = (state: QuestStore): QuestBackup => {
     lastProgressClass: state.lastProgressClass,
     discoveredResonances: state.discoveredResonances,
     resonanceBuffs: state.resonanceBuffs,
-    resonanceChain: state.resonanceChain
+    resonanceChain: state.resonanceChain,
+    featState: state.featState
   };
 };
 
@@ -457,6 +535,7 @@ export const useQuestStore = create<QuestStore>()(
       discoveredResonances: {},
       resonanceBuffs: createInitialResonanceBuffs(),
       resonanceChain: { count: 0 },
+      featState: createInitialFeatState(),
 
       addTask: (rawTitle, className: ClassName = "Wizard", tags: TaskTag[] = []) => {
         const title = rawTitle.trim();
@@ -484,13 +563,16 @@ export const useQuestStore = create<QuestStore>()(
 
       setFocusTask: (taskId) => {
         const now = new Date().toISOString();
-        set((state) => ({
-          focusTaskId: taskId,
-          tasks: state.tasks.map((task) =>
-            task.id === taskId ? { ...task, lastFocusedAt: now } : task
-          ),
-          dataUpdatedAt: now
-        }));
+        set((state) => {
+          const selectedTask = state.tasks.find((task) => task.id === taskId);
+          if (!selectedTask) return state;
+          const nextTask = { ...selectedTask, lastFocusedAt: now };
+          return {
+            focusTaskId: taskId,
+            tasks: [...state.tasks.filter((task) => task.id !== taskId), nextTask],
+            dataUpdatedAt: now
+          };
+        });
       },
 
       updateTaskStatus: (taskId, status) => {
@@ -590,13 +672,14 @@ export const useQuestStore = create<QuestStore>()(
         const momentum =
           state.momentumTaskId === taskId ? state.momentumCount + 1 : 1;
         const nextResonanceBuffs = { ...state.resonanceBuffs };
-        const forceAdvantage = nextResonanceBuffs.advantageChecks > 0;
-        const criticalBonusChance = nextResonanceBuffs.luckyChecks > 0 ? 0.05 : 0;
-
-        if (resonance?.reward.type === "advantage") nextResonanceBuffs.advantageChecks += 1;
-        if (resonance?.reward.type === "lucky") nextResonanceBuffs.luckyChecks += 1;
-        if (resonance?.reward.type === "doubleScroll") nextResonanceBuffs.doubleScrolls += 1;
-        if (resonance?.reward.type === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
+        const currentFeatState = refreshPendingFeatChoices(state.classStates, normalizeFeatState(state.featState), at);
+        const today = getLocalDayKey(now);
+        const dailyAdvantageAvailable = hasFeat(currentFeatState, "fate-dice", taskClassName) && currentFeatState.dailyAdvantageUsedAt !== today;
+        const existingDoubleScrollBuffs = nextResonanceBuffs.doubleScrolls;
+        const forceAdvantage = nextResonanceBuffs.advantageChecks > 0 || dailyAdvantageAvailable;
+        const criticalBonusChance =
+          (nextResonanceBuffs.luckyChecks > 0 ? 0.05 : 0) +
+          (hasFeat(currentFeatState, "lucky-one", taskClassName) ? 0.03 : 0);
 
         // Skill check (50% chance)
         let skillCheck: SkillCheckResult | undefined;
@@ -604,10 +687,18 @@ export const useQuestStore = create<QuestStore>()(
         if (triggerCheck) {
           const classLevel = getClassLevel(state.classStates[taskClassName].xp);
           skillCheck = rollSkillCheck(taskClassName, classLevel, { forceAdvantage, criticalBonusChance });
-          if (forceAdvantage) nextResonanceBuffs.advantageChecks = Math.max(0, nextResonanceBuffs.advantageChecks - 1);
-          if (criticalBonusChance > 0) nextResonanceBuffs.luckyChecks = Math.max(0, nextResonanceBuffs.luckyChecks - 1);
+          if (hasFeat(currentFeatState, "chosen-one", taskClassName)) {
+            skillCheck = { ...skillCheck, modifier: skillCheck.modifier + 1, success: skillCheck.success || skillCheck.roll + skillCheck.modifier + 1 >= skillCheck.dc };
+          }
+          if (!skillCheck.success && hasFeat(currentFeatState, "favored-by-fate", taskClassName) && Math.random() < 0.1) {
+            skillCheck = rollSkillCheck(taskClassName, classLevel, { forceAdvantage, criticalBonusChance });
+          }
+          if (dailyAdvantageAvailable) currentFeatState.dailyAdvantageUsedAt = today;
+          if (nextResonanceBuffs.advantageChecks > 0) nextResonanceBuffs.advantageChecks = Math.max(0, nextResonanceBuffs.advantageChecks - 1);
+          if (nextResonanceBuffs.luckyChecks > 0) nextResonanceBuffs.luckyChecks = Math.max(0, nextResonanceBuffs.luckyChecks - 1);
         }
 
+        const fatigueLimit = hasFeat(currentFeatState, "energy-manager", taskClassName) ? 120 : 100;
         const reward = calculateProgressReward({
           previousProgressCount: task.progressCount,
           progressCount,
@@ -617,14 +708,71 @@ export const useQuestStore = create<QuestStore>()(
           resonanceRewardType: resonance?.reward.type,
           resonanceChainBonus: resonance?.chainBonus,
           skillCheck,
-          doubleScrollBuffs: nextResonanceBuffs.doubleScrolls
+          doubleScrollBuffs: existingDoubleScrollBuffs,
+          fatigueMultiplierOverride: hasFeat(currentFeatState, "iron-will", taskClassName) && fatigueBefore > 80 ? 1 : undefined,
+          fatigueLimit
         });
         if (reward.consumedDoubleScroll) {
           nextResonanceBuffs.doubleScrolls = Math.max(0, nextResonanceBuffs.doubleScrolls - 1);
         }
 
+        const resonanceBonuses = { xp: 0, scrolls: 0, fatigueRecovery: 0 };
+        if (resonance?.reward.type === "advantage") nextResonanceBuffs.advantageChecks += 1;
+        if (resonance?.reward.type === "lucky") nextResonanceBuffs.luckyChecks += 1;
+        if (resonance?.reward.type === "doubleScroll") nextResonanceBuffs.doubleScrolls += 1;
+        if (resonance?.reward.type === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
+        if (resonance && hasFeat(currentFeatState, "resonance-core", taskClassName)) {
+          addResonanceReward(resonance.reward.type, nextResonanceBuffs, resonanceBonuses);
+        }
+        if (resonance && hasFeat(currentFeatState, "linkage-expert", taskClassName) && Math.random() < 0.1) {
+          addResonanceReward(resonance.reward.type, nextResonanceBuffs, resonanceBonuses);
+        }
+        if (resonanceBonuses.fatigueRecovery > 0) {
+          reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - resonanceBonuses.fatigueRecovery);
+        }
+        if (hasFeat(currentFeatState, "perpetual-motion", taskClassName)) {
+          reward.fatigueAfterProgress = Math.min(80, reward.fatigueAfterProgress);
+          reward.finalFatigueAfter = Math.min(80, reward.finalFatigueAfter);
+        }
+
+        let featBonusXp = resonanceBonuses.xp;
+        let featClassXpBonus = 0;
+        let featScrollBonus = resonanceBonuses.scrolls;
+        if (hasFeat(currentFeatState, "diligent-scholar", taskClassName)) featBonusXp += 1;
+        if (hasFeat(currentFeatState, "diligent-scholar", taskClassName)) featClassXpBonus += 1;
+        if (hasFeat(currentFeatState, "deep-thinking", taskClassName) && task.tags.includes("important")) featBonusXp += 2;
+        if (hasFeat(currentFeatState, "specialist", taskClassName) && momentum >= 3) featBonusXp += 3;
+        if (hasFeat(currentFeatState, "target-lock", taskClassName) && momentum >= 2) featBonusXp += Math.min(10, momentum - 1);
+        if (hasFeat(currentFeatState, "class-switcher", taskClassName) && synergyActive) featBonusXp += 3;
+        if (hasFeat(currentFeatState, "rapid-learning", taskClassName) && task.progressCount < 10) featClassXpBonus += Math.round(reward.classXpAwarded * 0.5);
+        if (hasFeat(currentFeatState, "school-master", taskClassName) && getClassLevel(state.classStates[taskClassName].xp) >= 20) featClassXpBonus += Math.round(reward.classXpAwarded * 0.2);
+        if (hasFeat(currentFeatState, "grand-library", taskClassName)) featClassXpBonus += Math.max(1, Math.round(reward.classXpAwarded * 0.1));
+        if (hasFeat(currentFeatState, "eidetic-memory", taskClassName) && skillCheck?.scrollEarned && Math.random() < 0.1) featScrollBonus += 1;
+        if (hasFeat(currentFeatState, "golden-hand", taskClassName) && reward.scrollsAwarded > 0 && Math.random() < 0.1) featScrollBonus += 1;
+        if (hasFeat(currentFeatState, "fate-weaver", taskClassName) && skillCheck?.critical) {
+          featClassXpBonus += skillCheck.xpBonus;
+          featScrollBonus += skillCheck.scrollCount;
+        }
+        if (hasFeat(currentFeatState, "long-hauler", taskClassName) && task.tags.includes("important")) featScrollBonus += 1;
+        if (hasFeat(currentFeatState, "legendary-crafter", taskClassName) && momentum >= 10) featScrollBonus += 1;
+        if (hasFeat(currentFeatState, "resonance-master", taskClassName) && resonance?.isNew) featScrollBonus += hasFeat(currentFeatState, "omnicollector", taskClassName) ? 2 : 1;
+        if (hasFeat(currentFeatState, "archaeologist", taskClassName) && reward.newRegion) featScrollBonus += hasFeat(currentFeatState, "omnicollector", taskClassName) ? 2 : 1;
+        if (resonance && hasFeat(currentFeatState, "social-adept", taskClassName)) featBonusXp += 1;
+        if (hasFeat(currentFeatState, "self-recovery", taskClassName) && state.lastProgressDate !== today) {
+          reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - 5);
+        }
+        if (synergyActive && hasFeat(currentFeatState, "party-coordinator", taskClassName)) {
+          reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - 5);
+        }
+        if (hasFeat(currentFeatState, "deep-work", taskClassName) && state.focusTaskId === taskId) {
+          reward.finalFatigueAfter = Math.max(fatigueBefore, reward.finalFatigueAfter - 2);
+        }
+        reward.finalFatigueAfter = Math.min(fatigueLimit, reward.finalFatigueAfter);
+
+        const totalBaseXp = reward.baseXp + featBonusXp;
+        const totalClassXpAwarded = reward.classXpAwarded + featClassXpBonus;
+        const totalScrollsAwarded = reward.scrollsAwarded + featScrollBonus;
         const nextStreakState = nextStreak(state.streak, now);
-        const today = getLocalDayKey(now);
         const firstOfDay = state.lastProgressDate !== today;
         const note = rawNote?.trim() || "推进一步";
 
@@ -635,12 +783,12 @@ export const useQuestStore = create<QuestStore>()(
           className: taskClassName,
           note,
           at,
-          xpAwarded: reward.baseXp,
-          classXpAwarded: reward.classXpAwarded,
+          xpAwarded: totalBaseXp,
+          classXpAwarded: totalClassXpAwarded,
           progressCount,
           skillCheck,
-          scrollEarned: reward.scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
-          scrollCount: reward.scrollsAwarded > 0 ? reward.scrollsAwarded : undefined,
+          scrollEarned: totalScrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label ?? CLASS_META[taskClassName].scrollName) : undefined,
+          scrollCount: totalScrollsAwarded > 0 ? totalScrollsAwarded : undefined,
           fatigueBefore,
           fatigueAfter: reward.finalFatigueAfter,
           synergyBonus: synergyActive,
@@ -651,14 +799,14 @@ export const useQuestStore = create<QuestStore>()(
           todoTitle: completedTodo?.title
         };
 
-        // Update class XP, scrolls and fatigue
         const updatedClassStates = { ...state.classStates };
         updatedClassStates[taskClassName] = {
           ...updatedClassStates[taskClassName],
-          xp: updatedClassStates[taskClassName].xp + reward.classXpAwarded,
-          scrolls: updatedClassStates[taskClassName].scrolls + reward.scrollsAwarded,
+          xp: updatedClassStates[taskClassName].xp + totalClassXpAwarded,
+          scrolls: updatedClassStates[taskClassName].scrolls + totalScrollsAwarded,
           fatigue: reward.finalFatigueAfter
         };
+        const nextFeatState = refreshPendingFeatChoices(updatedClassStates, currentFeatState, at);
 
         const updatedDiscoveries = resonance
           ? {
@@ -671,26 +819,25 @@ export const useQuestStore = create<QuestStore>()(
             }
           : state.discoveredResonances;
 
+        const updatedTask: QuestTask = {
+          ...task,
+          className: taskClassName,
+          status: task.status === "paused" ? "active" : task.status,
+          progressCount,
+          todos: completedTodo
+            ? task.todos.map((todo) =>
+                todo.id === completedTodo.id ? { ...todo, completedAt: at } : todo
+              )
+            : task.todos,
+          updatedAt: at,
+          lastFocusedAt: at
+        };
+
         set({
-          tasks: state.tasks.map((item) =>
-            item.id === taskId
-              ? {
-                  ...item,
-                  className: taskClassName,
-                  status: item.status === "paused" ? "active" : item.status,
-                  progressCount,
-                  todos: completedTodo
-                    ? item.todos.map((todo) =>
-                        todo.id === completedTodo.id ? { ...todo, completedAt: at } : todo
-                      )
-                    : item.todos,
-                  updatedAt: at
-                }
-              : item
-          ),
+          tasks: [...state.tasks.filter((item) => item.id !== taskId), updatedTask],
           logs: [log, ...state.logs],
           focusTaskId: taskId,
-          totalXp: state.totalXp + reward.baseXp,
+          totalXp: state.totalXp + totalBaseXp,
           streak: nextStreakState,
           momentumTaskId: taskId,
           momentumCount: momentum,
@@ -700,6 +847,7 @@ export const useQuestStore = create<QuestStore>()(
           discoveredResonances: updatedDiscoveries,
           resonanceBuffs: nextResonanceBuffs,
           resonanceChain: { count: resonance?.chainCount ?? 0, lastClass: taskClassName },
+          featState: nextFeatState,
           dataUpdatedAt: at
         });
 
@@ -708,16 +856,16 @@ export const useQuestStore = create<QuestStore>()(
           taskTitle: task.title,
           className: taskClassName,
           progressCount,
-          xpAwarded: reward.baseXp,
-          classXpAwarded: reward.classXpAwarded,
+          xpAwarded: totalBaseXp,
+          classXpAwarded: totalClassXpAwarded,
           momentum,
           milestone: reward.milestone,
           newRegion: reward.newRegion,
           streak: nextStreakState.count,
           firstOfDay,
           skillCheck,
-          scrollEarned: reward.scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
-          scrollCount: reward.scrollsAwarded > 0 ? reward.scrollsAwarded : undefined,
+          scrollEarned: totalScrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label ?? CLASS_META[taskClassName].scrollName) : undefined,
+          scrollCount: totalScrollsAwarded > 0 ? totalScrollsAwarded : undefined,
           fatigueBefore,
           fatigueAfter: reward.finalFatigueAfter,
           synergyBonus: synergyActive,
@@ -779,12 +927,23 @@ export const useQuestStore = create<QuestStore>()(
             : undefined
         };
 
+        const currentFeatState = normalizeFeatState(state.featState);
+        const featClassXpBonus = result.isNew && hasFeat(currentFeatState, "collector", className) ? 5 : result.upgraded && hasFeat(currentFeatState, "skill-fanatic", className) ? 8 : 0;
+        const featScrollBonus = result.isNew && hasFeat(currentFeatState, "codex-hunter", className) ? 1 : result.upgraded && hasFeat(currentFeatState, "treasure-hunter", className) && result.toTier >= 4 && Math.random() < 0.25 ? 1 : 0;
+        const updatedClassState = {
+          ...cs,
+          xp: cs.xp + featClassXpBonus,
+          scrolls: cs.scrolls - 1 + featScrollBonus,
+          skills: updatedSkills
+        };
+
         set({
           logs: [log, ...state.logs],
           classStates: {
             ...state.classStates,
-            [className]: { ...cs, scrolls: cs.scrolls - 1, skills: updatedSkills }
+            [className]: updatedClassState
           },
+          featState: refreshPendingFeatChoices({ ...state.classStates, [className]: updatedClassState }, currentFeatState, now),
           dataUpdatedAt: now
         });
 
@@ -819,7 +978,8 @@ export const useQuestStore = create<QuestStore>()(
             lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined,
             discoveredResonances: data.discoveredResonances ?? {},
             resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs(),
-            resonanceChain: data.resonanceChain ?? { count: 0 }
+            resonanceChain: data.resonanceChain ?? { count: 0 },
+            featState: refreshPendingFeatChoices(normalizeClassStates(data.classStates), normalizeFeatState(data.featState), now)
           });
           return true;
         } catch {
@@ -845,7 +1005,8 @@ export const useQuestStore = create<QuestStore>()(
           restState: undefined,
           discoveredResonances: {},
           resonanceBuffs: createInitialResonanceBuffs(),
-          resonanceChain: { count: 0 }
+          resonanceChain: { count: 0 },
+          featState: createInitialFeatState()
         });
       },
 
@@ -872,10 +1033,11 @@ export const useQuestStore = create<QuestStore>()(
 
         if (state.restState.type === "short") {
           // Short rest: reduce fatigue by 30%, min 0
+          const recovery = hasFeat(state.featState, "nap") ? Math.round(SHORT_REST_RECOVERY * 1.1) : SHORT_REST_RECOVERY;
           for (const cn of classNames) {
             updatedClassStates[cn] = {
               ...updatedClassStates[cn],
-              fatigue: Math.max(0, updatedClassStates[cn].fatigue - SHORT_REST_RECOVERY)
+              fatigue: Math.max(0, updatedClassStates[cn].fatigue - recovery)
             };
           }
         } else {
@@ -898,12 +1060,56 @@ export const useQuestStore = create<QuestStore>()(
         const nextResonanceBuffs = state.restState.type === "long"
           ? { ...state.resonanceBuffs, longRestScrolls: 0 }
           : state.resonanceBuffs;
+        const currentFeatState = normalizeFeatState(state.featState);
+        const targetClass = state.lastProgressClass ?? "Wizard";
+        if (state.restState.type === "long" && hasFeat(currentFeatState, "deep-sleep")) {
+          updatedClassStates[targetClass] = {
+            ...updatedClassStates[targetClass],
+            scrolls: updatedClassStates[targetClass].scrolls + 1
+          };
+        }
+        if (hasFeat(currentFeatState, "meditator")) {
+          updatedClassStates[targetClass] = {
+            ...updatedClassStates[targetClass],
+            xp: updatedClassStates[targetClass].xp + (state.restState.type === "long" ? 20 : 8)
+          };
+        }
+        const nextFeatState = {
+          ...currentFeatState,
+          shortRestCount: currentFeatState.shortRestCount + (state.restState.type === "short" ? 1 : 0),
+          longRestCount: currentFeatState.longRestCount + (state.restState.type === "long" ? 1 : 0)
+        };
         const now = new Date().toISOString();
-        set({ classStates: updatedClassStates, restState: undefined, resonanceBuffs: nextResonanceBuffs, dataUpdatedAt: now });
+        set({
+          classStates: updatedClassStates,
+          restState: undefined,
+          resonanceBuffs: nextResonanceBuffs,
+          featState: refreshPendingFeatChoices(updatedClassStates, nextFeatState, now),
+          dataUpdatedAt: now
+        });
       },
 
       cancelRest: () => {
         set({ restState: undefined, dataUpdatedAt: new Date().toISOString() });
+      },
+
+      chooseFeat: (choiceId, featId) => {
+        const state = get();
+        const currentFeatState = normalizeFeatState(state.featState);
+        const choice = currentFeatState.pending.find((item) => item.id === choiceId);
+        if (!choice || !choice.choices.includes(featId) || !FEAT_MAP[featId]) return false;
+        if (currentFeatState.owned.some((feat) => feat.id === featId)) return false;
+        const now = new Date().toISOString();
+        const nextFeatState: FeatState = {
+          ...currentFeatState,
+          owned: [
+            ...currentFeatState.owned,
+            { id: featId, className: choice.className, selectedAt: now, level: choice.level }
+          ],
+          pending: currentFeatState.pending.filter((item) => item.id !== choiceId)
+        };
+        set({ featState: refreshPendingFeatChoices(state.classStates, nextFeatState, now), dataUpdatedAt: now });
+        return true;
       },
 
       markSynced: (syncedAt) => {
@@ -1033,6 +1239,16 @@ export const useQuestStore = create<QuestStore>()(
             ...data,
             tasks,
             logs: normalizeLogs(data.logs, tasks)
+          };
+        }
+
+        // v12→v13: add permanent class feats, pending feat choices and rest counters.
+        if (version < 13) {
+          const classStates = normalizeClassStates(data.classStates);
+          data = {
+            ...data,
+            classStates,
+            featState: refreshPendingFeatChoices(classStates, normalizeFeatState(data.featState), new Date().toISOString())
           };
         }
 

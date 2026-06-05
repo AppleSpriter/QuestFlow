@@ -5,7 +5,7 @@
 ## Project Overview
 
 QuestFlow is a client-side "progress tracker" with DnD class growth and RPG quest logging.
-Core loop: push task → class XP → skill check → earn scrolls → learn/upgrade skill lines → manage fatigue → trigger class resonance → rest & summarize.
+Core loop: push task → class XP → skill check → earn scrolls → learn/upgrade skill lines → class levels → permanent feats → automatic Build detection → rest & summarize.
 
 ## Tech Stack
 
@@ -27,12 +27,14 @@ app/
   api/webdav/              -- WebDAV proxy route handlers
   sync/page.tsx            -- Cloud sync configuration page
   resonance/page.tsx       -- Class resonance temple matrix / collection page
+  build/page.tsx           -- Feat and automatic Build overview page
 lib/
   quest-store.ts           -- Zustand store: all state, gamification logic, migrations
   server/webdav-config.ts  -- Server-side WebDAV config resolution/local config file helpers
 data/
   classes.ts               -- Class definitions, skill lines, skill checks, fatigue, tags, tier system
   resonance.ts             -- 66 class resonance definitions, rewards, badges, levels, chain helpers
+  feats.ts                 -- Feat definitions, quality/flow metadata, feat choice and Build helpers
 components/
   SkillCheckToast.tsx      -- Skill check result toast (dice roll/success/failure/scroll/synergy)
   ScrollReveal.tsx         -- Scroll opening animation (skill reveal/tier upgrade)
@@ -51,7 +53,7 @@ package.json               -- Scripts, npm package version, electron-builder con
 ## Versioning and Packaging
 
 - The packaged app version in `package.json` must track the latest current development entry in `CHANGELOG.md`.
-- Example: when the newest changelog milestone is `v1.7`, package builds should use `version: "1.7.0"`.
+- Example: when the newest changelog milestone is `v1.8`, package builds should use `version: "1.8.0"`.
 - Keep README/AGENTS/changelog/package version notes aligned when a release milestone changes.
 - Desktop scripts:
   - `npm run desktop:dev`: run Next on port 3100 and launch Electron against it.
@@ -66,9 +68,9 @@ package.json               -- Scripts, npm package version, electron-builder con
 - Zustand `persist` middleware + `createJSONStorage(() => localStorage)`
 - WebDAV sync available via `/api/webdav` proxy and `/sync` config page
 - WebDAV config is resolved server-side in `lib/server/webdav-config.ts`; do not store credentials in Zustand/browser state.
-- **Persist version: 12** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12)
+- **Persist version: 13** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12 → v13)
 
-### Store Schema (v12)
+### Store Schema (v13)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -86,6 +88,7 @@ package.json               -- Scripts, npm package version, electron-builder con
 | discoveredResonances | Record<string, DiscoveredResonance> | Unlocked class resonance combos, discovery time, trigger count |
 | resonanceBuffs | ResonanceBuffs | Pending resonance buffs: advantage/lucky/double-scroll/long-rest-scroll |
 | resonanceChain | ResonanceChainState | Consecutive cross-class progress chain counter |
+| featState | FeatState | Permanent selected feats, pending 3-choice feat points, daily feat usage and rest counters |
 | dataUpdatedAt | string \| undefined | Last data change timestamp (for WebDAV sync) |
 | lastSyncedAt | string \| undefined | Last successful WebDAV sync timestamp |
 
@@ -160,12 +163,20 @@ type RestState = {
   startedAt: string;
   endsAt: string;
 }
+
+type FeatState = {
+  owned: OwnedFeat[];
+  pending: PendingFeatChoice[];
+  dailyAdvantageUsedAt?: string;
+  shortRestCount: number;
+  longRestCount: number;
+}
 ```
 
 ### Backup Contract
 
-- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `12`.
-- `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, and resonance chain.
+- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `13`.
+- `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, resonance chain, and feat state.
 - `updatedAt` is derived from `dataUpdatedAt`, task `updatedAt`, and log `at` so WebDAV conflict checks can compare local vs remote freshness.
 - `importData()` normalizes tasks and class states before writing to Zustand; use it for local file import and WebDAV restore instead of manually assigning persisted data.
 - If the store schema changes, bump the persist/backup version together and add a migration path before changing sync or import behavior.
@@ -212,6 +223,18 @@ Tier n requires **2^(n-1) copies** of the same line:
 | 9 | 256 | 511 |
 
 Key functions: `getTierFromCopies()`, `getCopiesForTier()`, `getNextTierCopies()`
+
+## Feat and Build System
+
+Defined in `data/feats.ts`, each class earns one permanent feat point at Lv4/Lv8/Lv12/Lv16...
+
+- Feat choices are stored in `featState.pending`; each point presents 3 deterministic choices.
+- Selected feats are stored in `featState.owned` and are not resettable in v1.8.
+- Feat selection uses a two-step confirmation flow; the modal can be dismissed and pending choices can be completed later on `/build`.
+- Feat flows: learning, focus, luck, resonance, collection, rest.
+- Feat qualities: common, rare, epic, legendary.
+- `/build` automatically detects Build routes from feats, class XP, resonance trigger counts, rest counters and skill collection rate, and also surfaces pending feat choices.
+- Reward hooks live in store actions: `progressTask()`, `useScroll()`, and `completeRest()`.
 
 ## Skill Check System
 
@@ -331,7 +354,7 @@ page.tsx
   │   ├── TaskMapProgress    ← map region progress
   │   └── ProgressBurst      ← particle burst + XP float text
   ├── QuestCard[]            ← task cards (title color matches class hexColor)
-  │   └── TaskMapProgress    ← map region progress
+  │   └── QuestProgressBadge ← compact map region badge
   ├── ProgressLogPanel       ← right-side progress log (shows DC, roll, modifier)
   ├── RestUI                 ← rest countdown + confirmation
   ├── LongRestSummaryModal   ← daily adventure summary
@@ -340,9 +363,9 @@ page.tsx
       └── ScrollReveal       ← scroll opening animation
 ```
 
-## Data Migration (v1→v11)
+## Data Migration (v1→v13)
 
-Zustand persist `version: 11`, `migrate` function handles:
+Zustand persist `version: 13`, `migrate` function handles:
 
 - **v1→v3**: Add totalXp, classStates, lastProgressDate; remove xp/crystals/companions/gachaHistory
 - **v3→v4**: Recalculate all skill tiers using 2^(n-1) formula
@@ -354,6 +377,7 @@ Zustand persist `version: 11`, `migrate` function handles:
 - **v9→v10**: Add resonance chain state
 - **v10→v11**: Add `ProgressLog.type` and `ProgressLog.className`; scroll use now writes skill event logs
 - **v11→v12**: Add per-task `QuestTodoItem[]`; completed todos store `todoId`/`todoTitle` on progress logs
+- **v12→v13**: Add `FeatState`, pending feat choices, permanent owned feats, daily feat usage, and rest counters
 
 ## Key Conventions
 
@@ -361,6 +385,7 @@ Zustand persist `version: 11`, `migrate` function handles:
 - **Animation queues**: Never set animation state directly on user action; always enqueue via refs to prevent overlap.
 - **Zustand for data clearing**: Use `clearAll()` action, not direct `localStorage.removeItem()` (persist middleware may rewrite on unmount).
 - **Store actions are the single source of truth**: All state mutations go through Zustand actions in `quest-store.ts`.
+- **Active task ordering**: `progressTask()` appends the progressed task to the end of `tasks` and updates `lastFocusedAt`; the quick active-task selector sorts by `createdAt` so it stays stable for finding tasks.
 - **Task class mapping**: `getTaskClass(task)` determines which class a task belongs to (from `task.className`).
 - **Resonance keys**: Always use `getResonanceKey(a, b)` so class pairs are order-independent.
 - **WebDAV sync**: Use `/api/webdav` route handlers and `lib/server/webdav-config.ts`; do not call WebDAV directly from client components.

@@ -27,6 +27,8 @@ export type ProgressRewardInput = {
   resonanceChainBonus?: boolean;
   skillCheck?: SkillCheckResult;
   doubleScrollBuffs?: number;
+  fatigueMultiplierOverride?: number;
+  fatigueLimit?: number;
 };
 
 export type ProgressRewardResult = {
@@ -46,7 +48,7 @@ export type ProgressRewardResult = {
 };
 
 export function calculateProgressReward(input: ProgressRewardInput): ProgressRewardResult {
-  const fatigueMultiplier = getFatigueMultiplier(input.fatigueBefore);
+  const fatigueMultiplier = input.fatigueMultiplierOverride ?? getFatigueMultiplier(input.fatigueBefore);
   const tagBonus = getTagBonus(input.tags);
   const momentumBonus = input.momentum >= MOMENTUM_BONUS_THRESHOLD ? MOMENTUM_BONUS_XP : 0;
   const milestone = milestones.has(input.progressCount) ? input.progressCount : undefined;
@@ -72,7 +74,8 @@ export function calculateProgressReward(input: ProgressRewardInput): ProgressRew
     consumedDoubleScroll = doubleScrollBonus > 0;
   }
 
-  const fatigueAfterProgress = Math.min(100, input.fatigueBefore + FATIGUE_PER_PROGRESS);
+  const fatigueLimit = input.fatigueLimit ?? 100;
+  const fatigueAfterProgress = Math.min(fatigueLimit, input.fatigueBefore + FATIGUE_PER_PROGRESS);
   const finalFatigueAfter =
     input.resonanceRewardType === 'fatigue'
       ? Math.max(0, fatigueAfterProgress - RESONANCE_FATIGUE_RECOVERY)

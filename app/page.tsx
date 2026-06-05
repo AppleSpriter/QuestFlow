@@ -51,10 +51,19 @@ import {
   SHORT_REST_MINUTES,
   LONG_REST_MINUTES
 } from "@/data/classes";
-import { TaskMapProgress } from "@/components/TaskMapProgress";
 import type { ResonanceTrigger } from "@/data/resonance";
 import { SkillCheckToast, type SkillCheckInfo } from "@/components/SkillCheckToast";
 import { Spellbook } from "@/components/Spellbook";
+import { TaskMapProgress } from "@/components/TaskMapProgress";
+import {
+  FEAT_FLOW_META,
+  FEAT_MAP,
+  FEAT_QUALITY_META,
+  getNextFeatLevel,
+  getOwnedFeatsForClass,
+  getPrimaryFeatFlow,
+  type PendingFeatChoice
+} from "@/data/feats";
 
 const statusTabs: Array<{ id: QuestStatus; label: string }> = [
   { id: "active", label: "Active" },
@@ -161,12 +170,14 @@ export default function QuestFlowPage() {
   const totalXp = useQuestStore((state) => state.totalXp);
   const streak = useQuestStore((state) => state.streak);
   const classStates = useQuestStore((state) => state.classStates);
+  const featState = useQuestStore((state) => state.featState);
   const addTask = useQuestStore((state) => state.addTask);
   const setFocusTask = useQuestStore((state) => state.setFocusTask);
   const updateTaskStatus = useQuestStore((state) => state.updateTaskStatus);
   const addTaskTodo = useQuestStore((state) => state.addTaskTodo);
   const toggleTaskTodo = useQuestStore((state) => state.toggleTaskTodo);
   const progressTask = useQuestStore((state) => state.progressTask);
+  const chooseFeat = useQuestStore((state) => state.chooseFeat);
 
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
@@ -192,6 +203,8 @@ export default function QuestFlowPage() {
   const [showAllClasses, setShowAllClasses] = useState(false);
   const [todoTitle, setTodoTitle] = useState("");
   const [showCompletedTodos, setShowCompletedTodos] = useState(false);
+  const [activeFeatChoiceId, setActiveFeatChoiceId] = useState<string | null>(null);
+  const [dismissedFeatChoiceIds, setDismissedFeatChoiceIds] = useState<string[]>([]);
   const [newResonance, setNewResonance] = useState<ResonanceTrigger | null>(null);
   const [normalResonance, setNormalResonance] = useState<ResonanceTrigger | null>(null);
   const normalResonanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -242,8 +255,21 @@ export default function QuestFlowPage() {
     if (normalResonanceTimerRef.current) clearTimeout(normalResonanceTimerRef.current);
   }, []);
 
-  const activeTasks = useMemo(() => tasks.filter((t) => t.status === "active"), [tasks]);
-  const visibleTasks = useMemo(() => tasks.filter((t) => t.status === statusFilter), [statusFilter, tasks]);
+  const activeTasks = useMemo(
+    () => tasks
+      .filter((t) => t.status === "active")
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [tasks]
+  );
+  const visibleTasks = useMemo(() => {
+    const filtered = tasks.filter((t) => t.status === statusFilter);
+    if (statusFilter !== "active") return filtered;
+    return [...filtered].sort((a, b) => {
+      const aTime = new Date(a.lastFocusedAt ?? a.updatedAt).getTime();
+      const bTime = new Date(b.lastFocusedAt ?? b.updatedAt).getTime();
+      return aTime - bTime;
+    });
+  }, [statusFilter, tasks]);
   const focusTask = useMemo(() => tasks.find((t) => t.id === focusTaskId && t.status !== "archived"), [focusTaskId, tasks]);
   const focusLogs = useMemo(
     () => logs.filter((log) => log.taskId === focusTask?.id || log.type === 'scroll').slice(0, 8),
@@ -253,6 +279,11 @@ export default function QuestFlowPage() {
 
   const focusRegionId = focusTask ? getMapRegion(focusTask.progressCount).id : "camp";
   const focusBg = regionBackgrounds[focusRegionId] ?? regionBackgrounds.camp;
+  const activeFeatChoice = useMemo(
+    () => featState.pending.find((choice) => choice.id === activeFeatChoiceId)
+      ?? featState.pending.find((choice) => !dismissedFeatChoiceIds.includes(choice.id)),
+    [activeFeatChoiceId, dismissedFeatChoiceIds, featState.pending]
+  );
   const visibleClassNames = useMemo(() => {
     const lastClass = lastProgressClass ?? focusTask?.className;
     const ordered = [...ALL_CLASSES].sort((a, b) => {
@@ -264,7 +295,7 @@ export default function QuestFlowPage() {
       const activityB = stateB.xp + stateB.scrolls * 25 + stateB.skills.length * 10 + stateB.fatigue;
       return activityB - activityA;
     });
-    return showAllClasses ? ordered : ordered.slice(0, 5);
+    return showAllClasses ? ordered : ordered.slice(0, 4);
   }, [classStates, focusTask?.className, lastProgressClass, showAllClasses]);
 
   const createQuest = () => {
@@ -389,6 +420,18 @@ export default function QuestFlowPage() {
     handleProgressResult(toggleTaskTodo(focusTask.id, todoId));
   };
 
+  const selectFeat = (choiceId: string, featId: string) => {
+    if (chooseFeat(choiceId, featId)) {
+      setActiveFeatChoiceId(null);
+      setDismissedFeatChoiceIds((ids) => ids.filter((id) => id !== choiceId));
+    }
+  };
+
+  const dismissFeatChoice = (choiceId: string) => {
+    setActiveFeatChoiceId(null);
+    setDismissedFeatChoiceIds((ids) => ids.includes(choiceId) ? ids : [...ids, choiceId]);
+  };
+
   if (!mounted) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center justify-center px-4 text-sm text-slate-500">
@@ -409,6 +452,7 @@ export default function QuestFlowPage() {
         {celebration ? <MilestoneOverlay key={`milestone-${celebration.taskId}-${celebration.progressCount}`} result={celebration} /> : null}
         {normalResonance ? <NormalResonanceEffect key={`normal-resonance-${normalResonance.key}-${normalResonance.triggerCount}`} resonance={normalResonance} /> : null}
         {newResonance ? <NewResonanceModal key={`new-resonance-${newResonance.key}`} resonance={newResonance} discoveredCount={Object.keys(useQuestStore.getState().discoveredResonances).length} onClose={() => setNewResonance(null)} /> : null}
+        {activeFeatChoice ? <FeatChoiceModal key={activeFeatChoice.id} choice={activeFeatChoice} onClose={dismissFeatChoice} onSelect={selectFeat} /> : null}
       </AnimatePresence>
 
       <SkillCheckToast info={skillCheckInfo} />
@@ -465,7 +509,7 @@ export default function QuestFlowPage() {
                 className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97]"
               >
                 {showAllClasses ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                {showAllClasses ? "显示 5 个" : `展开全部 ${ALL_CLASSES.length}`}
+                {showAllClasses ? "显示 4 个" : `展开全部 ${ALL_CLASSES.length}`}
               </button>
             ) : null}
             <button
@@ -488,7 +532,7 @@ export default function QuestFlowPage() {
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="overflow-hidden"
             >
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 <AnimatePresence initial={false}>
                   {visibleClassNames.map((cn) => {
                     const meta = CLASS_META[cn];
@@ -500,6 +544,9 @@ export default function QuestFlowPage() {
                     const skillCount = cs.skills.length;
                     const fatigueStage = getFatigueStage(cs.fatigue);
                     const stageMeta = FATIGUE_STAGE_META[fatigueStage];
+                    const ownedFeats = getOwnedFeatsForClass(featState, cn);
+                    const primaryFlow = getPrimaryFeatFlow(featState, cn);
+                    const nextFeatLevel = getNextFeatLevel(cn, classStates, featState);
                     return (
                       <motion.div
                         layout
@@ -510,15 +557,37 @@ export default function QuestFlowPage() {
                         transition={{ duration: 0.18, ease: "easeOut" }}
                         className={`rounded-lg border px-3 py-2 text-xs font-semibold ${classStyles[cn]}`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <span>{meta.emoji}</span>
-                            <span className="truncate">{cn} Lv{lvl}</span>
+                        <div
+                          className="group relative"
+                          title={`${cn} Lv${lvl} · ${meta.label}\nXP ${cs.xp}（本级 ${currentXp}/100）\n卷轴 ${scrollCount} · 技能 ${skillCount} · 专长 ${ownedFeats.length}\nFatigue ${cs.fatigue}% · ${stageMeta.label}\n${primaryFlow ? `主要流派：${FEAT_FLOW_META[primaryFlow].label}` : "主要流派：未成型"}`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex min-w-0 flex-1 items-center gap-1.5 pr-2">
+                              <span className="shrink-0">{meta.emoji}</span>
+                              <span className="min-w-0 truncate font-black">{cn} Lv{lvl}</span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1 text-[10px] opacity-70">
+                              {cn === lastProgressClass && <span className="rounded-full bg-white/80 px-1.5 font-black">最近</span>}
+                              {scrollCount > 0 && <span>📜{scrollCount}</span>}
+                              {skillCount > 0 && <span>✨{skillCount}</span>}
+                              {ownedFeats.length > 0 && <span>🧬{ownedFeats.length}</span>}
+                            </div>
                           </div>
-                          <div className="flex shrink-0 items-center gap-1 opacity-70">
-                            {cn === lastProgressClass && <span className="rounded-full bg-white/80 px-1.5 text-[10px] font-black">最近</span>}
-                            {scrollCount > 0 && <span>📜{scrollCount}</span>}
-                            {skillCount > 0 && <span>✨{skillCount}</span>}
+                          <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 hidden w-64 rounded-2xl border border-slate-200 bg-white p-3 text-slate-700 shadow-2xl group-hover:block">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-sm font-black text-slate-950">{meta.emoji} {cn} Lv{lvl}</div>
+                              <div className="text-[10px] font-black text-slate-400">{meta.label}</div>
+                            </div>
+                            <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[11px] font-bold">
+                              <div className="rounded-xl bg-slate-50 px-2 py-1">XP<br />{cs.xp}</div>
+                              <div className="rounded-xl bg-slate-50 px-2 py-1">卷轴<br />{scrollCount}</div>
+                              <div className="rounded-xl bg-slate-50 px-2 py-1">技能<br />{skillCount}</div>
+                            </div>
+                            <div className="mt-2 text-xs font-bold text-slate-500">疲劳：{stageMeta.emoji} {stageMeta.label} · {cs.fatigue}%</div>
+                            <div className="mt-1 text-xs font-bold text-slate-500">专长：{ownedFeats.length} 个 · {primaryFlow ? FEAT_FLOW_META[primaryFlow].label : "未成型"}</div>
+                            <Link href={`/build?class=${cn}`} className="pointer-events-auto mt-3 inline-flex rounded-full bg-slate-950 px-3 py-1.5 text-xs font-black text-white transition hover:bg-slate-800">
+                              查看 Build
+                            </Link>
                           </div>
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
@@ -541,11 +610,15 @@ export default function QuestFlowPage() {
                               className="h-full rounded-full"
                               style={{ backgroundColor: stageMeta.color }}
                               initial={{ width: 0 }}
-                              animate={{ width: `${cs.fatigue}%` }}
+                              animate={{ width: `${Math.min(100, cs.fatigue)}%` }}
                               transition={{ duration: 0.45, ease: "easeOut" }}
                             />
                           </div>
                           <span className="shrink-0 text-[10px] opacity-70">{cs.fatigue}%</span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] font-black opacity-75">
+                          {primaryFlow ? <span>{FEAT_FLOW_META[primaryFlow].emoji} {FEAT_FLOW_META[primaryFlow].label}</span> : <span>专长未选择</span>}
+                          {nextFeatLevel ? <span>下个专长 Lv{nextFeatLevel}</span> : <span>可继续成长</span>}
                         </div>
                       </motion.div>
                     );
@@ -573,6 +646,13 @@ export default function QuestFlowPage() {
         >
           <Sparkles size={16} />
           共鸣圣殿
+        </Link>
+        <Link
+          href="/build"
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-100 active:scale-[0.97]"
+        >
+          <Trophy size={16} />
+          Build
         </Link>
         {restState ? (
           <div className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
@@ -1038,6 +1118,24 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
   );
 }
 
+function QuestProgressBadge({ progressCount }: { progressCount: number }) {
+  const region = getMapRegion(progressCount);
+  const nextStep = Number.isFinite(region.maxProgress) ? region.maxProgress + 1 : null;
+  const regionProgress = nextStep
+    ? Math.min(100, Math.round(((progressCount - region.minProgress + 1) / (region.maxProgress - region.minProgress + 1)) * 100))
+    : 100;
+
+  return (
+    <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600">
+      <span className="shrink-0">{region.emoji}</span>
+      <span className="min-w-0 truncate">{region.name}</span>
+      <span className="shrink-0 text-slate-400">·</span>
+      <span className="shrink-0">区域 {regionProgress}%</span>
+      {nextStep ? <span className="shrink-0 text-slate-400">下站 {nextStep}</span> : <span className="shrink-0 text-slate-400">传奇阶段</span>}
+    </div>
+  );
+}
+
 type QuestCardProps = {
   task: QuestTask;
   isFocus: boolean;
@@ -1085,7 +1183,7 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
               );
             })}
           </div>
-          <div className="mt-2"><TaskMapProgress progressCount={task.progressCount} /></div>
+          <div className="mt-3"><QuestProgressBadge progressCount={task.progressCount} /></div>
         </div>
         <motion.div key={task.progressCount} initial={{ scale: 0.88, opacity: 0.45 }} animate={{ scale: 1, opacity: 1 }} className="shrink-0 text-right">
           <div className="text-3xl font-semibold text-slate-950">{task.progressCount}</div>
@@ -1373,6 +1471,65 @@ function EmptyState({ status }: { status: QuestStatus }) {
         <p className="mt-2 text-sm font-medium text-slate-600">{text}</p>
       </div>
     </div>
+  );
+}
+
+function FeatChoiceModal({ choice, onClose, onSelect }: { choice: PendingFeatChoice; onClose: (choiceId: string) => void; onSelect: (choiceId: string, featId: string) => void }) {
+  const meta = CLASS_META[choice.className];
+  const [selectedFeatId, setSelectedFeatId] = useState<string | null>(null);
+  const selectedFeat = selectedFeatId ? FEAT_MAP[selectedFeatId] : null;
+  return (
+    <motion.div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-white/80 bg-white shadow-2xl" initial={{ opacity: 0, y: 28, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.97 }}>
+        <div className="bg-gradient-to-br from-amber-50 via-white to-violet-50 p-6 text-center">
+          <div className="text-sm font-black uppercase tracking-[0.24em] text-amber-500">Feat Point Unlocked</div>
+          <h2 className="mt-2 text-3xl font-black text-slate-950">{meta.emoji} {choice.className} Lv{choice.level} 专长选择</h2>
+          <p className="mt-2 text-sm font-semibold text-slate-500">先点选一个专长，再点击底部确认。也可以稍后在 Build 页面选择。</p>
+        </div>
+        <div className="grid gap-3 p-5 md:grid-cols-3">
+          {choice.choices.map((featId) => {
+            const feat = FEAT_MAP[featId];
+            const flow = FEAT_FLOW_META[feat.flow];
+            const quality = FEAT_QUALITY_META[feat.quality];
+            const selected = selectedFeatId === feat.id;
+            return (
+              <button
+                key={feat.id}
+                type="button"
+                onClick={() => setSelectedFeatId(feat.id)}
+                className={`group rounded-3xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-amber-300 hover:shadow-lift active:scale-[0.98] ${selected ? "border-amber-400 ring-4 ring-amber-100" : "border-slate-200"}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-3xl">{feat.emoji}</div>
+                  <span className="rounded-full px-2 py-1 text-xs font-black" style={{ backgroundColor: `${quality.color}1A`, color: quality.color }}>
+                    {quality.emoji} {quality.label}
+                  </span>
+                </div>
+                <div className="mt-3 text-xl font-black text-slate-950">{feat.name}</div>
+                <div className="mt-1 text-xs font-black" style={{ color: flow.color }}>{flow.emoji} {flow.label}</div>
+                <p className="mt-3 text-sm font-bold text-slate-700">{feat.summary}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-500">{feat.detail}</p>
+                <div className={`mt-4 rounded-2xl px-3 py-2 text-center text-sm font-black transition ${selected ? "bg-amber-500 text-white" : "bg-slate-950 text-white opacity-0 group-hover:opacity-100"}`}>
+                  {selected ? "已选中，等待确认" : "点选此专长"}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-bold text-slate-500">
+            {selectedFeat ? `将永久选择：${selectedFeat.emoji} ${selectedFeat.name}` : "未选择前不会写入存档。"}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/build" onClick={() => onClose(choice.id)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-50 active:scale-[0.98]">去 Build 页面</Link>
+            <button type="button" onClick={() => onClose(choice.id)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-50 active:scale-[0.98]">稍后再选</button>
+            <button type="button" disabled={!selectedFeatId} onClick={() => selectedFeatId && onSelect(choice.id, selectedFeatId)} className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-black text-white transition hover:bg-slate-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-300">
+              确认选择（永久）
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
