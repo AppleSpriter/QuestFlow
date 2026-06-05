@@ -15,6 +15,7 @@ Core loop: push task → class XP → skill check → earn scrolls → learn/upg
 - **State**: Zustand with `persist` middleware (localStorage)
 - **Icons**: lucide-react
 - **Confetti**: react-confetti
+- **Desktop**: Electron + electron-builder
 
 ## Directory Structure
 
@@ -28,6 +29,7 @@ app/
   resonance/page.tsx       -- Class resonance temple matrix / collection page
 lib/
   quest-store.ts           -- Zustand store: all state, gamification logic, migrations
+  server/webdav-config.ts  -- Server-side WebDAV config resolution/local config file helpers
 data/
   classes.ts               -- Class definitions, skill lines, skill checks, fatigue, tags, tier system
   resonance.ts             -- 66 class resonance definitions, rewards, badges, levels, chain helpers
@@ -36,23 +38,42 @@ components/
   ScrollReveal.tsx         -- Scroll opening animation (skill reveal/tier upgrade)
   Spellbook.tsx            -- Spellbook modal (class list/skill lines/scroll use, with animation queue)
   TaskMapProgress.tsx      -- Quest map region progress bar
+electron/
+  main.js                  -- Electron main process, packaged Next standalone server launcher
+build/
+  icon.icns / icon.ico     -- Desktop app icons for macOS/Windows packaging
 public/
   logo.png                 -- App logo (also used as favicon)
+CHANGELOG.md               -- Release/development progress source of truth
+package.json               -- Scripts, npm package version, electron-builder config
 ```
+
+## Versioning and Packaging
+
+- The packaged app version in `package.json` must track the latest current development entry in `CHANGELOG.md`.
+- Example: when the newest changelog milestone is `v1.7`, package builds should use `version: "1.7.0"`.
+- Keep README/AGENTS/changelog/package version notes aligned when a release milestone changes.
+- Desktop scripts:
+  - `npm run desktop:dev`: run Next on port 3100 and launch Electron against it.
+  - `npm run desktop:dir`: build Next and create an unpacked Electron app directory.
+  - `npm run desktop:build`: build the macOS DMG/ZIP targets.
+  - `npm run desktop:build:win`: build the Windows NSIS/ZIP x64 targets.
+- Packaged Electron starts the Next standalone server from `process.resourcesPath/next/server.js`, binds it to `127.0.0.1`, and passes `QUESTFLOW_WEBDAV_CONFIG` to keep desktop WebDAV config in Electron `userData`.
 
 ## Data Persistence
 
 - All data in browser `localStorage`, key `"questflow-v1"`
 - Zustand `persist` middleware + `createJSONStorage(() => localStorage)`
 - WebDAV sync available via `/api/webdav` proxy and `/sync` config page
-- **Persist version: 10** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10)
+- WebDAV config is resolved server-side in `lib/server/webdav-config.ts`; do not store credentials in Zustand/browser state.
+- **Persist version: 11** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11)
 
-### Store Schema (v10)
+### Store Schema (v11)
 
 | Field | Type | Description |
 |-------|------|-------------|
 | tasks | QuestTask[] | All tasks: id, title, progressCount, status, className, tags, timestamps |
-| logs | ProgressLog[] | Progress history: note, xpAwarded, classXpAwarded, skillCheck, scrollEarned, fatigue, synergyBonus |
+| logs | ProgressLog[] | Progress/scroll history: type, className, note, XP, skillCheck, scroll changes, skill events, fatigue, resonance |
 | focusTaskId | string \| undefined | Currently focused task ID |
 | totalXp | number | Total XP across all classes |
 | streak | { count: number; lastProgressDate?: string } | Consecutive day streak |
@@ -92,7 +113,9 @@ type QuestTask = {
 
 type ProgressLog = {
   id: string;
+  type: "progress" | "scroll";
   taskId: string;
+  className: ClassName;
   note: string;
   at: string;
   xpAwarded: number;
@@ -135,6 +158,14 @@ type RestState = {
   endsAt: string;
 }
 ```
+
+### Backup Contract
+
+- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `11`.
+- `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, and resonance chain.
+- `updatedAt` is derived from `dataUpdatedAt`, task `updatedAt`, and log `at` so WebDAV conflict checks can compare local vs remote freshness.
+- `importData()` normalizes tasks and class states before writing to Zustand; use it for local file import and WebDAV restore instead of manually assigning persisted data.
+- If the store schema changes, bump the persist/backup version together and add a migration path before changing sync or import behavior.
 
 ## Class System
 
@@ -181,12 +212,13 @@ Key functions: `getTierFromCopies()`, `getCopiesForTier()`, `getNextTierCopies()
 
 ## Skill Check System
 
-Triggered on every `progressTask` call:
+Each `progressTask` call has a 50% chance to trigger a skill check:
 
 - d20 + floor(classLevel / 2) vs DC 10~15
 - Natural 20 → Critical: +10 XP, 2 scrolls (double)
 - Total >= DC → Success: +5 XP, 1 scroll
 - Total < DC → Failure: no extra reward
+- Resonance `advantage` and `lucky` buffs apply to the next triggered skill check, not necessarily the next progress action.
 
 `SkillCheckResult` records: dc, roll, modifier, naturalRolls, advantageTriggered, success, critical, scrollCount.
 
@@ -225,6 +257,8 @@ Rest flow: start → countdown (with "early finish" button) → confirmation mod
 ### Long Rest Summary (`LongRestSummary`)
 
 Shows: per-class progress/skills/XP/scrolls today, total XP, total scrolls, streak days.
+
+Per-class attribution uses `ProgressLog.className`; scroll-use logs (`type: "scroll"`) are included for skill events but excluded from progress counts and XP totals.
 
 ## Class Resonance System
 
@@ -303,9 +337,9 @@ page.tsx
       └── ScrollReveal       ← scroll opening animation
 ```
 
-## Data Migration (v1→v10)
+## Data Migration (v1→v11)
 
-Zustand persist `version: 10`, `migrate` function handles:
+Zustand persist `version: 11`, `migrate` function handles:
 
 - **v1→v3**: Add totalXp, classStates, lastProgressDate; remove xp/crystals/companions/gachaHistory
 - **v3→v4**: Recalculate all skill tiers using 2^(n-1) formula
@@ -315,6 +349,7 @@ Zustand persist `version: 10`, `migrate` function handles:
 - **v7→v8**: Add 7 new classes and class states
 - **v8→v9**: Add resonance collection and pending resonance buffs
 - **v9→v10**: Add resonance chain state
+- **v10→v11**: Add `ProgressLog.type` and `ProgressLog.className`; scroll use now writes skill event logs
 
 ## Key Conventions
 
@@ -324,3 +359,13 @@ Zustand persist `version: 10`, `migrate` function handles:
 - **Store actions are the single source of truth**: All state mutations go through Zustand actions in `quest-store.ts`.
 - **Task class mapping**: `getTaskClass(task)` determines which class a task belongs to (from `task.className`).
 - **Resonance keys**: Always use `getResonanceKey(a, b)` so class pairs are order-independent.
+- **WebDAV sync**: Use `/api/webdav` route handlers and `lib/server/webdav-config.ts`; do not call WebDAV directly from client components.
+- **Package version**: Before desktop builds/releases, compare `package.json` `version` with the newest `CHANGELOG.md` milestone.
+
+## Verification Checklist
+
+- Run `npm run build` for Next.js production build checks after app/store/data changes.
+- Run `npm run desktop:dir` after Electron packaging or standalone-server resource changes.
+- Run `npm run desktop:build` / `npm run desktop:build:win` only when verifying release artifacts for the target platform.
+- For WebDAV changes, verify `/sync`, `/api/webdav`, and config persistence behavior in both browser dev mode and packaged Electron mode when relevant.
+- For persisted store changes, test migration/import with an older backup and confirm `questflow-v1` localStorage data still hydrates.

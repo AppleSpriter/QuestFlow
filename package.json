@@ -1,6 +1,6 @@
 {
   "name": "questflow-v1",
-  "version": "0.1.0",
+  "version": "1.7.0",
   "description": "QuestFlow desktop progress tracker",
   "author": "QuestFlow",
   "private": true,

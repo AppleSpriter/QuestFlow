@@ -8,7 +8,7 @@ export type WebDavConfig = {
   filePath: string;
 };
 
-export const defaultWebDavFilePath = "questflow/questflow-backup-v10.json";
+export const defaultWebDavFilePath = "questflow/questflow-backup-v11.json";
 export const legacyWebDavFilePath = "questflow/questflow-backup.json";
 
 const configFileName = ".questflow-webdav.local.json";

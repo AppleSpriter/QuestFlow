@@ -26,6 +26,7 @@ import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getLevelProgress,
+  type ProgressLog,
   type ProgressResult,
   type QuestStatus,
   type QuestTask,
@@ -111,9 +112,15 @@ const regionBackgrounds: Record<string, string> = {
 
 const classNames: ClassName[] = ALL_CLASSES;
 
+type LongRestClassState = {
+  xp: number;
+  scrolls: number;
+  skills: { lineId: string; currentTier: number }[];
+};
+
 function buildLongRestSummary(
-  logs: Array<{ at: string; classXpAwarded: number; scrollEarned?: string; scrollCount?: number; skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName } }>,
-  classStates: Record<ClassName, { xp: number; scrolls: number; skills: { lineId: string; currentTier: number }[] }>,
+  logs: ProgressLog[],
+  classStates: Record<ClassName, LongRestClassState>,
   streakCount: number
 ): LongRestSummary {
   const today = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date());
@@ -125,15 +132,17 @@ function buildLongRestSummary(
   let totalScrolls = 0;
 
   for (const cn of classNames) {
-    const cnLogs = todayLogs.filter((l) => {
-      // approximate: logs don't store className directly, use scrollType or skillUpgrade
-      return l.scrollEarned === CLASS_META[cn].scrollName || l.skillUpgrade?.className === cn;
+    const cnLogs = todayLogs.filter((l) => l.className === cn);
+    const progressLogs = cnLogs.filter((l) => l.type !== "scroll");
+    const xpGained = progressLogs.reduce((sum, l) => sum + l.classXpAwarded, 0);
+    const scrollsEarned = progressLogs.reduce((sum, l) => sum + Math.max(0, l.scrollCount ?? 0), 0);
+    const skillEvents = cnLogs.flatMap((l) => {
+      if (l.skillUpgrade) return [`${l.skillUpgrade.name} → ${l.skillUpgrade.toTier}环`];
+      if (l.newSkill) return [`习得 ${l.newSkill}`];
+      return [];
     });
-    const xpGained = cnLogs.reduce((sum, l) => sum + l.classXpAwarded, 0);
-    const scrollsEarned = cnLogs.reduce((sum, l) => sum + (l.scrollCount ?? 0), 0);
-    const skillEvents = cnLogs.filter((l) => l.skillUpgrade).map((l) => l.skillUpgrade ? `${l.skillUpgrade.name} → ${l.skillUpgrade.toTier}环` : "");
 
-    classSummaries[cn] = { progressCount: cnLogs.length, xpGained, scrollsEarned, skillEvents };
+    classSummaries[cn] = { progressCount: progressLogs.length, xpGained, scrollsEarned, skillEvents };
     totalXp += xpGained;
     totalScrolls += scrollsEarned;
   }
@@ -228,7 +237,10 @@ export default function QuestFlowPage() {
   const activeTasks = useMemo(() => tasks.filter((t) => t.status === "active"), [tasks]);
   const visibleTasks = useMemo(() => tasks.filter((t) => t.status === statusFilter), [statusFilter, tasks]);
   const focusTask = useMemo(() => tasks.find((t) => t.id === focusTaskId && t.status !== "archived"), [focusTaskId, tasks]);
-  const focusLogs = useMemo(() => logs.filter((l) => l.taskId === focusTask?.id).slice(0, 8), [focusTask?.id, logs]);
+  const focusLogs = useMemo(
+    () => logs.filter((log) => log.taskId === focusTask?.id || log.type === 'scroll').slice(0, 8),
+    [focusTask?.id, logs]
+  );
   const level = getLevelProgress(totalXp);
 
   const focusRegionId = focusTask ? getMapRegion(focusTask.progressCount).id : "camp";
@@ -923,7 +935,7 @@ function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }
 }
 
 function ProgressBurst({ result }: { result: ProgressResult }) {
-  const taskClass = (result.skillCheck?.className ?? "Wizard") as ClassName;
+  const taskClass = result.className;
   const baseColor = CLASS_META[taskClass].hexColor;
   const colors = [baseColor, "#22c55e", "#0ea5e9", "#f59e0b", "#fb7185"];
   const particleTypes = ["particle", "particle-star", "particle-diamond", "particle-ring"] as const;
@@ -959,11 +971,21 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
         );
       })}
 
-      <motion.div initial={{ opacity: 0, y: 18, scale: 0.8, rotate: -3 }} animate={{ opacity: 1, y: 0, scale: [0.8, 1.12, 0.96, 1], rotate: [-3, 1, 0] }} exit={{ opacity: 0, y: -18, scale: 0.96 }} transition={{ duration: 0.45, ease: "easeOut" }}
-        className="absolute right-4 top-4 rounded-xl border border-emerald-200 bg-white px-5 py-4 shadow-lift">
+      <motion.div
+        initial={{ opacity: 0, y: 18, scale: 0.8, rotate: -3 }}
+        animate={{
+          opacity: 1,
+          y: 0,
+          scale: [0.8, 1.12, 0.96, 1],
+          rotate: [-3, 1, 0],
+        }}
+        exit={{ opacity: 0, y: -18, scale: 0.96 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+        className="absolute right-4 top-4 rounded-xl border border-emerald-200 bg-white px-5 py-4 shadow-lift"
+      >
         <div className="text-base font-bold text-emerald-700">+1 Progress</div>
         <div className="mt-1 text-sm font-semibold text-slate-600">+{result.xpAwarded} XP</div>
-        <div className="text-sm font-semibold text-violet-600">+{result.classXpAwarded} {CLASS_META[result.skillCheck?.className ?? "Wizard"].emoji} XP</div>
+        <div className="text-sm font-semibold text-violet-600">+{result.classXpAwarded} {CLASS_META[result.className].emoji} XP</div>
         {result.momentum >= 3 && (
           <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
             🔥 Momentum x{result.momentum}
@@ -979,15 +1001,33 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
   );
 }
 
-function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: {
-  task: QuestTask; isFocus: boolean; isPulsing: boolean; onFocus: () => void; onProgress: () => void; onStatus: (s: QuestStatus) => void;
-}) {
+type QuestCardProps = {
+  task: QuestTask;
+  isFocus: boolean;
+  isPulsing: boolean;
+  onFocus: () => void;
+  onProgress: () => void;
+  onStatus: (status: QuestStatus) => void;
+};
+
+function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: QuestCardProps) {
   const taskClass = getTaskClass(task);
 
   return (
-    <motion.article layout animate={isPulsing ? { scale: [1, 1.035, 1], borderColor: ["#dde3eb", "#22c55e", "#dde3eb"] } : { scale: 1 }} whileHover={{ y: -2 }} transition={{ duration: 0.55, ease: "easeOut" }}
-      className={`rounded-lg border bg-white p-4 shadow-sm ${isFocus ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200"}`}
-      style={{ borderLeftWidth: "4px", borderLeftColor: CLASS_META[taskClass].hexColor }}>
+    <motion.article
+      layout
+      animate={
+        isPulsing
+          ? { scale: [1, 1.035, 1], borderColor: ["#dde3eb", "#22c55e", "#dde3eb"] }
+          : { scale: 1 }
+      }
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.55, ease: "easeOut" }}
+      className={`rounded-lg border bg-white p-4 shadow-sm ${
+        isFocus ? "border-slate-950 ring-2 ring-slate-950/10" : "border-slate-200"
+      }`}
+      style={{ borderLeftWidth: "4px", borderLeftColor: CLASS_META[taskClass].hexColor }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -1022,17 +1062,33 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
       <div className="mt-4 flex flex-wrap gap-2">
         {task.status !== "archived" ? (
           <>
-            <IconButton onClick={onFocus} label="Focus" title="Focus"><Target size={17} /></IconButton>
-            <button type="button" onClick={onProgress} className="focus-ring inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 text-sm font-semibold text-white transition hover:bg-emerald-600 active:scale-[0.97]">
+            <IconButton onClick={onFocus} label="Focus" title="Focus">
+              <Target size={17} />
+            </IconButton>
+            <button
+              type="button"
+              onClick={onProgress}
+              className="focus-ring inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-3 text-sm font-semibold text-white transition hover:bg-emerald-600 active:scale-[0.97]"
+            >
               <Zap size={17} /> +1
             </button>
-            <IconButton onClick={() => onStatus(task.status === "paused" ? "active" : "paused")} label={task.status === "paused" ? "Resume" : "Pause"} title="Toggle pause">
+            <IconButton
+              onClick={() => onStatus(task.status === "paused" ? "active" : "paused")}
+              label={task.status === "paused" ? "Resume" : "Pause"}
+              title="Toggle pause"
+            >
               {task.status === "paused" ? <Play size={17} /> : <Pause size={17} />}
             </IconButton>
-            <IconButton onClick={() => onStatus("archived")} label="Archive" title="Archive"><Archive size={17} /></IconButton>
+            <IconButton onClick={() => onStatus("archived")} label="Archive" title="Archive">
+              <Archive size={17} />
+            </IconButton>
           </>
         ) : (
-          <button type="button" onClick={() => onStatus("active")} className="focus-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800">
+          <button
+            type="button"
+            onClick={() => onStatus("active")}
+            className="focus-ring inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+          >
             <RotateCcw size={17} /> Restore
           </button>
         )}
@@ -1041,15 +1097,32 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
   );
 }
 
-function IconButton({ onClick, title, label, children }: { onClick: () => void; title: string; label: string; children: ReactNode }) {
+type IconButtonProps = {
+  onClick: () => void;
+  title: string;
+  label: string;
+  children: ReactNode;
+};
+
+const iconButtonClass =
+  "focus-ring grid min-h-10 min-w-10 place-items-center rounded-lg border border-slate-200 bg-white " +
+  "text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.93] active:bg-slate-100";
+
+function IconButton({ onClick, title, label, children }: IconButtonProps) {
   return (
-    <button type="button" onClick={onClick} className="focus-ring grid min-h-10 min-w-10 place-items-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.93] active:bg-slate-100" title={title} aria-label={label}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={iconButtonClass}
+      title={title}
+      aria-label={label}
+    >
       {children}
     </button>
   );
 }
 
-function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: string; at: string; xpAwarded: number; classXpAwarded: number; progressCount: number; skillCheck?: { success: boolean; critical: boolean; skillName: string; className: ClassName; classLevel?: number; dc: number; roll: number; modifier: number; advantageTriggered?: boolean; naturalRolls?: number[]; scrollCount?: number }; scrollEarned?: string; scrollCount?: number }>; task?: QuestTask }) {
+function ProgressLogPanel({ logs, task }: { logs: ProgressLog[]; task?: QuestTask }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -1062,31 +1135,71 @@ function ProgressLogPanel({ logs, task }: { logs: Array<{ id: string; note: stri
       {logs.length > 0 ? (
         <div className="space-y-3">
           {logs.map((log) => (
-            <motion.article key={log.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <motion.article
+              key={log.id}
+              layout
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+            >
               <div className="flex items-center justify-between gap-2">
                 <time className="text-xs font-semibold text-slate-500">{formatLogTime(log.at)}</time>
                 <div className="flex gap-2">
-                  <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">+{log.xpAwarded} XP</span>
-                  <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-semibold text-violet-700">+{log.classXpAwarded} {CLASS_META[log.skillCheck?.className ?? "Wizard"].emoji}</span>
+                  {log.type !== "scroll" ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">
+                      +{log.xpAwarded} XP
+                    </span>
+                  ) : null}
+                  <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-semibold text-violet-700">
+                    {CLASS_META[log.className].emoji} {log.className}
+                  </span>
                 </div>
               </div>
               {log.skillCheck && (
                 <div className="mt-1 flex items-center gap-1 text-xs">
                   <span>🎲</span>
-                  <span className={log.skillCheck.success ? "text-emerald-600 font-medium" : "text-red-500 font-medium"}>
-                    Lv{log.skillCheck.classLevel ?? 1} {log.skillCheck.skillName} {log.skillCheck.critical ? "大成功" : log.skillCheck.success ? "成功" : "失败"}
-                    {` · DC ${log.skillCheck.dc} · 投骰 ${log.skillCheck.roll}+${log.skillCheck.modifier}=${log.skillCheck.roll + log.skillCheck.modifier}`}
-                    {log.skillCheck.advantageTriggered ? ` · 等级优势(${log.skillCheck.naturalRolls?.join("/") ?? log.skillCheck.roll})` : ""}
+                  <span
+                    className={
+                      log.skillCheck.success
+                        ? "text-emerald-600 font-medium"
+                        : "text-red-500 font-medium"
+                    }
+                  >
+                    Lv{log.skillCheck.classLevel ?? 1} {log.skillCheck.skillName}{" "}
+                    {log.skillCheck.critical ? "大成功" : log.skillCheck.success ? "成功" : "失败"}
+                    {` · DC ${log.skillCheck.dc} · 投骰 ${log.skillCheck.roll}+${
+                      log.skillCheck.modifier
+                    }=${log.skillCheck.roll + log.skillCheck.modifier}`}
+                    {log.skillCheck.advantageTriggered
+                      ? ` · 等级优势(${log.skillCheck.naturalRolls?.join("/") ?? log.skillCheck.roll})`
+                      : ""}
                   </span>
                 </div>
               )}
               {log.scrollEarned && (
                 <div className="mt-1 text-xs font-semibold text-amber-700">
-                  📜 {log.scrollEarned}{log.scrollCount && log.scrollCount > 1 ? ` x${log.scrollCount}` : ""}
+                  📜 {log.scrollEarned}
+                  {log.scrollCount && log.scrollCount > 0
+                    ? ` x${log.scrollCount}`
+                    : log.scrollCount === -1
+                      ? " 消耗 1"
+                      : ""}
                 </div>
               )}
+              {log.newSkill ? (
+                <div className="mt-1 text-xs font-semibold text-violet-700">
+                  ✨ 习得 {log.newSkill}
+                </div>
+              ) : null}
+              {log.skillUpgrade ? (
+                <div className="mt-1 text-xs font-semibold text-sky-700">
+                  ⬆️ {log.skillUpgrade.name} → {log.skillUpgrade.toTier}环
+                </div>
+              ) : null}
               <p className="mt-2 break-words text-sm font-medium text-slate-900">{log.note}</p>
-              <p className="mt-2 text-xs text-slate-500">Progress {log.progressCount}</p>
+              {log.type !== "scroll" ? (
+                <p className="mt-2 text-xs text-slate-500">Progress {log.progressCount}</p>
+              ) : null}
             </motion.article>
           ))}
         </div>

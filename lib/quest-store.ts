@@ -9,6 +9,7 @@ import {
   type OwnedSkill,
   type TaskTag,
   ALL_CLASSES,
+  CLASS_META,
   initClassState,
   getClassLevel,
   rollSkillCheck,
@@ -17,10 +18,6 @@ import {
   getSkillNameAtTier,
   getTierFromCopies,
   SKILL_LINES,
-  getMapRegion,
-  getFatigueMultiplier,
-  getTagBonus,
-  FATIGUE_PER_PROGRESS,
   SHORT_REST_RECOVERY
 } from "@/data/classes";
 import {
@@ -33,8 +30,12 @@ import {
   getResonanceKey,
   getResonanceLevel
 } from "@/data/resonance";
+import {
+  calculateProgressReward
+} from "@/lib/progress-rewards";
 
 export type QuestStatus = "active" | "paused" | "archived";
+export type ProgressLogType = "progress" | "scroll";
 
 export type QuestTask = {
   id: string;
@@ -50,7 +51,9 @@ export type QuestTask = {
 
 export type ProgressLog = {
   id: string;
+  type: ProgressLogType;
   taskId: string;
+  className: ClassName;
   note: string;
   at: string;
   xpAwarded: number;
@@ -72,6 +75,7 @@ export type ProgressLog = {
 export type ProgressResult = {
   taskId: string;
   taskTitle: string;
+  className: ClassName;
   progressCount: number;
   xpAwarded: number;
   classXpAwarded: number;
@@ -170,11 +174,9 @@ type QuestStore = {
   markSynced: (syncedAt: string) => void;
 };
 
-const milestones = new Set([5, 10, 25, 50]);
-const milestoneXpBonus: Record<number, number> = { 5: 25, 10: 50, 25: 75, 50: 100 };
 const classNames: ClassName[] = ALL_CLASSES;
-export const QUESTFLOW_BACKUP_VERSION = 10;
-export const QUESTFLOW_COMPATIBILITY_VERSION = 10;
+export const QUESTFLOW_BACKUP_VERSION = 11;
+export const QUESTFLOW_COMPATIBILITY_VERSION = 11;
 
 const getSkillLineIds = () => new Set(SKILL_LINES.map((line) => line.id));
 
@@ -247,6 +249,63 @@ const normalizeTasks = (tasks: unknown): QuestTask[] => {
       createdAt,
       updatedAt,
       lastFocusedAt: typeof item.lastFocusedAt === "string" ? item.lastFocusedAt : undefined
+    };
+  });
+};
+
+const inferLogClassName = (
+  log: Partial<ProgressLog>,
+  tasksById: Map<string, QuestTask>
+): ClassName => {
+  if (isClassName(log.className)) return log.className;
+  if (isClassName(log.skillCheck?.className)) return log.skillCheck.className;
+  if (log.skillUpgrade && isClassName(log.skillUpgrade.className)) return log.skillUpgrade.className;
+  const scrollClass = typeof log.scrollEarned === "string"
+    ? classNames.find((cn) => log.scrollEarned === CLASS_META[cn].scrollName)
+    : undefined;
+  if (scrollClass) return scrollClass;
+  if (typeof log.taskId === "string") {
+    const taskClass = tasksById.get(log.taskId)?.className;
+    if (isClassName(taskClass)) return taskClass;
+  }
+  return "Wizard";
+};
+
+const normalizeLogs = (logs: unknown, tasks: QuestTask[] = []): ProgressLog[] => {
+  if (!Array.isArray(logs)) return [];
+
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
+
+  return logs.map((log) => {
+    const item = log as Partial<ProgressLog>;
+    const at = typeof item.at === "string" ? item.at : new Date().toISOString();
+    const className = inferLogClassName(item, tasksById);
+    const type: ProgressLogType =
+      item.type === "scroll" || (item.taskId === "scroll" && (item.newSkill || item.skillUpgrade))
+        ? "scroll"
+        : "progress";
+
+    return {
+      id: typeof item.id === "string" ? item.id : makeId(),
+      type,
+      taskId: typeof item.taskId === "string" ? item.taskId : type,
+      className,
+      note: typeof item.note === "string" ? item.note : type === "scroll" ? "使用卷轴" : "推进一步",
+      at,
+      xpAwarded: Math.max(0, Math.floor(Number(item.xpAwarded) || 0)),
+      classXpAwarded: Math.max(0, Math.floor(Number(item.classXpAwarded) || 0)),
+      progressCount: Math.max(0, Math.floor(Number(item.progressCount) || 0)),
+      skillCheck: item.skillCheck,
+      scrollEarned: typeof item.scrollEarned === "string" ? item.scrollEarned : undefined,
+      scrollCount: typeof item.scrollCount === "number" ? item.scrollCount : undefined,
+      newSkill: typeof item.newSkill === "string" ? item.newSkill : undefined,
+      skillUpgrade: item.skillUpgrade,
+      fatigueBefore: typeof item.fatigueBefore === "number" ? item.fatigueBefore : undefined,
+      fatigueAfter: typeof item.fatigueAfter === "number" ? item.fatigueAfter : undefined,
+      synergyBonus: typeof item.synergyBonus === "boolean" ? item.synergyBonus : undefined,
+      resonanceKey: typeof item.resonanceKey === "string" ? item.resonanceKey : undefined,
+      resonanceName: typeof item.resonanceName === "string" ? item.resonanceName : undefined,
+      resonanceReward: typeof item.resonanceReward === "string" ? item.resonanceReward : undefined
     };
   });
 };
@@ -417,14 +476,7 @@ export const useQuestStore = create<QuestStore>()(
         const at = now.toISOString();
         const progressCount = task.progressCount + 1;
         const taskClassName = isClassName(task.className) ? task.className : "Wizard";
-
-        // Fatigue
         const fatigueBefore = state.classStates[taskClassName].fatigue;
-        const fatigueAfter = Math.min(100, fatigueBefore + FATIGUE_PER_PROGRESS);
-        const fatigueMultiplier = getFatigueMultiplier(fatigueBefore);
-
-        // Tag bonus
-        const tagBonus = getTagBonus(task.tags ?? []);
 
         // Class resonance: switching class from last progress
         const synergyActive = !!state.lastProgressClass && state.lastProgressClass !== taskClassName;
@@ -450,18 +502,8 @@ export const useQuestStore = create<QuestStore>()(
             }
           : undefined;
 
-        // XP
         const momentum =
           state.momentumTaskId === taskId ? state.momentumCount + 1 : 1;
-        const momentumBonus = momentum >= 3 ? 10 : 0;
-        const milestone = milestones.has(progressCount) ? progressCount : undefined;
-        const milestoneBonus = milestone ? (milestoneXpBonus[milestone] ?? 50) : 0;
-        const resonanceBonusXp = resonance?.reward.type === "xp" ? 3 : 0;
-        const baseXp = Math.round((5 + tagBonus + momentumBonus + milestoneBonus + resonanceBonusXp) * fatigueMultiplier);
-
-        // Class XP
-        let classXpAwarded = Math.round(5 * fatigueMultiplier);
-        let scrollsAwarded = (resonance?.reward.type === "scroll" ? 1 : 0) + (resonance?.chainBonus ? 1 : 0);
         const nextResonanceBuffs = { ...state.resonanceBuffs };
         const forceAdvantage = nextResonanceBuffs.advantageChecks > 0;
         const criticalBonusChance = nextResonanceBuffs.luckyChecks > 0 ? 0.05 : 0;
@@ -479,20 +521,22 @@ export const useQuestStore = create<QuestStore>()(
           skillCheck = rollSkillCheck(taskClassName, classLevel, { forceAdvantage, criticalBonusChance });
           if (forceAdvantage) nextResonanceBuffs.advantageChecks = Math.max(0, nextResonanceBuffs.advantageChecks - 1);
           if (criticalBonusChance > 0) nextResonanceBuffs.luckyChecks = Math.max(0, nextResonanceBuffs.luckyChecks - 1);
-          classXpAwarded += Math.round(skillCheck.xpBonus * fatigueMultiplier);
-
-          // Scroll on success (1 for success, 2 for critical)
-          if (skillCheck.scrollEarned) {
-            const doubleScrollBonus = nextResonanceBuffs.doubleScrolls > 0 ? 1 : 0;
-            scrollsAwarded += skillCheck.scrollCount + doubleScrollBonus;
-            if (doubleScrollBonus > 0) nextResonanceBuffs.doubleScrolls = Math.max(0, nextResonanceBuffs.doubleScrolls - 1);
-          }
         }
 
-        // Map region change
-        const oldRegion = getMapRegion(task.progressCount);
-        const newRegionData = getMapRegion(progressCount);
-        const newRegion = oldRegion.id !== newRegionData.id ? newRegionData.name : undefined;
+        const reward = calculateProgressReward({
+          previousProgressCount: task.progressCount,
+          progressCount,
+          tags: task.tags ?? [],
+          fatigueBefore,
+          momentum,
+          resonanceRewardType: resonance?.reward.type,
+          resonanceChainBonus: resonance?.chainBonus,
+          skillCheck,
+          doubleScrollBuffs: nextResonanceBuffs.doubleScrolls
+        });
+        if (reward.consumedDoubleScroll) {
+          nextResonanceBuffs.doubleScrolls = Math.max(0, nextResonanceBuffs.doubleScrolls - 1);
+        }
 
         const nextStreakState = nextStreak(state.streak, now);
         const today = getLocalDayKey(now);
@@ -501,17 +545,19 @@ export const useQuestStore = create<QuestStore>()(
 
         const log: ProgressLog = {
           id: makeId(),
+          type: "progress",
           taskId,
+          className: taskClassName,
           note,
           at,
-          xpAwarded: baseXp,
-          classXpAwarded,
+          xpAwarded: reward.baseXp,
+          classXpAwarded: reward.classXpAwarded,
           progressCount,
           skillCheck,
-          scrollEarned: scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
-          scrollCount: scrollsAwarded > 0 ? scrollsAwarded : undefined,
+          scrollEarned: reward.scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
+          scrollCount: reward.scrollsAwarded > 0 ? reward.scrollsAwarded : undefined,
           fatigueBefore,
-          fatigueAfter: resonance?.reward.type === "fatigue" ? Math.max(0, fatigueAfter - 10) : fatigueAfter,
+          fatigueAfter: reward.finalFatigueAfter,
           synergyBonus: synergyActive,
           resonanceKey: resonance?.key,
           resonanceName: resonance?.name,
@@ -519,13 +565,12 @@ export const useQuestStore = create<QuestStore>()(
         };
 
         // Update class XP, scrolls and fatigue
-        const finalFatigueAfter = resonance?.reward.type === "fatigue" ? Math.max(0, fatigueAfter - 10) : fatigueAfter;
         const updatedClassStates = { ...state.classStates };
         updatedClassStates[taskClassName] = {
           ...updatedClassStates[taskClassName],
-          xp: updatedClassStates[taskClassName].xp + classXpAwarded,
-          scrolls: updatedClassStates[taskClassName].scrolls + scrollsAwarded,
-          fatigue: finalFatigueAfter
+          xp: updatedClassStates[taskClassName].xp + reward.classXpAwarded,
+          scrolls: updatedClassStates[taskClassName].scrolls + reward.scrollsAwarded,
+          fatigue: reward.finalFatigueAfter
         };
 
         const updatedDiscoveries = resonance
@@ -553,7 +598,7 @@ export const useQuestStore = create<QuestStore>()(
           ),
           logs: [log, ...state.logs],
           focusTaskId: taskId,
-          totalXp: state.totalXp + baseXp,
+          totalXp: state.totalXp + reward.baseXp,
           streak: nextStreakState,
           momentumTaskId: taskId,
           momentumCount: momentum,
@@ -569,19 +614,20 @@ export const useQuestStore = create<QuestStore>()(
         return {
           taskId,
           taskTitle: task.title,
+          className: taskClassName,
           progressCount,
-          xpAwarded: baseXp,
-          classXpAwarded,
+          xpAwarded: reward.baseXp,
+          classXpAwarded: reward.classXpAwarded,
           momentum,
-          milestone,
-          newRegion,
+          milestone: reward.milestone,
+          newRegion: reward.newRegion,
           streak: nextStreakState.count,
           firstOfDay,
           skillCheck,
-          scrollEarned: scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
-          scrollCount: scrollsAwarded > 0 ? scrollsAwarded : undefined,
+          scrollEarned: reward.scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
+          scrollCount: reward.scrollsAwarded > 0 ? reward.scrollsAwarded : undefined,
           fatigueBefore,
-          fatigueAfter: finalFatigueAfter,
+          fatigueAfter: reward.finalFatigueAfter,
           synergyBonus: synergyActive,
           resonance,
           at
@@ -595,6 +641,8 @@ export const useQuestStore = create<QuestStore>()(
 
         const result = learnSkillFromScroll(className, cs.skills);
         if (!result) return null;
+        const line = getLineById(result.lineId);
+        if (!line) return null;
 
         const updatedSkills = [...cs.skills];
         const existingIdx = updatedSkills.findIndex((s) => s.lineId === result.lineId);
@@ -615,12 +663,37 @@ export const useQuestStore = create<QuestStore>()(
           });
         }
 
+        const now = new Date().toISOString();
+        const skillName = getSkillNameAtTier(line, result.toTier);
+        const log: ProgressLog = {
+          id: makeId(),
+          type: "scroll",
+          taskId: "scroll",
+          className,
+          note: result.isNew
+            ? `使用${CLASS_META[className].scrollName}习得 ${skillName}`
+            : result.upgraded
+              ? `使用${CLASS_META[className].scrollName}将 ${line.name} 升至 ${result.toTier} 环`
+              : `使用${CLASS_META[className].scrollName}强化 ${line.name}`,
+          at: now,
+          xpAwarded: 0,
+          classXpAwarded: 0,
+          progressCount: 0,
+          scrollEarned: CLASS_META[className].scrollName,
+          scrollCount: -1,
+          newSkill: result.isNew ? skillName : undefined,
+          skillUpgrade: result.upgraded
+            ? { name: skillName, fromTier: result.fromTier, toTier: result.toTier, className }
+            : undefined
+        };
+
         set({
+          logs: [log, ...state.logs],
           classStates: {
             ...state.classStates,
             [className]: { ...cs, scrolls: cs.scrolls - 1, skills: updatedSkills }
           },
-          dataUpdatedAt: new Date().toISOString()
+          dataUpdatedAt: now
         });
 
         return result;
@@ -638,9 +711,10 @@ export const useQuestStore = create<QuestStore>()(
           if (!data.tasks) return false;
           const now = new Date().toISOString();
           const importedUpdatedAt = data.updatedAt ?? data.exportedAt ?? now;
+          const tasks = normalizeTasks(data.tasks);
           set({
-            tasks: normalizeTasks(data.tasks),
-            logs: data.logs ?? [],
+            tasks,
+            logs: normalizeLogs(data.logs, tasks),
             focusTaskId: data.focusTaskId,
             totalXp: data.totalXp ?? 0,
             streak: data.streak ?? { count: 0 },
@@ -737,10 +811,11 @@ export const useQuestStore = create<QuestStore>()(
       },
 
       cancelRest: () => {
-        set({ restState: undefined });
+        set({ restState: undefined, dataUpdatedAt: new Date().toISOString() });
       },
 
       markSynced: (syncedAt) => {
+        // Sync metadata should not bump dataUpdatedAt, or the just-synced backup looks stale immediately.
         set({ lastSyncedAt: syncedAt });
       }
     }),
@@ -846,6 +921,16 @@ export const useQuestStore = create<QuestStore>()(
           data = {
             ...data,
             resonanceChain: data.resonanceChain ?? { count: 0 }
+          };
+        }
+
+        // v10→v11: add log type/className so summaries and skill events are exact.
+        if (version < 11) {
+          const tasks = normalizeTasks(data.tasks);
+          data = {
+            ...data,
+            tasks,
+            logs: normalizeLogs(data.logs, tasks)
           };
         }
 
