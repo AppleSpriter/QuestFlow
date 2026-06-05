@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type QuestBackup, useQuestStore } from "@/lib/quest-store";
+import { QUESTFLOW_COMPATIBILITY_VERSION, type QuestBackup, useQuestStore } from "@/lib/quest-store";
 import { ALL_CLASSES, CLASS_META, type ClassName } from "@/data/classes";
 
 type PublicWebDavConfig = {
@@ -61,10 +61,13 @@ type RemoteConflict = {
   localUpdatedAt: string;
 };
 
+const defaultBackupFilePath = `questflow/questflow-backup-v${QUESTFLOW_COMPATIBILITY_VERSION}.json`;
+const legacyBackupFilePath = "questflow/questflow-backup.json";
+
 const emptyConfig: PublicWebDavConfig = {
   url: "",
   username: "",
-  filePath: "questflow/questflow-backup.json",
+  filePath: defaultBackupFilePath,
   hasPassword: false
 };
 
@@ -271,11 +274,25 @@ export default function SyncPage() {
       etag?: string;
     }>({ action: "download" });
 
-    if (result.missing || !result.data) {
-      return null;
+    if (!result.missing && result.data) {
+      return result.data;
     }
 
-    return result.data;
+    if (config.filePath !== legacyBackupFilePath) {
+      const legacyResult = await postWebDav<{
+        ok: boolean;
+        missing?: boolean;
+        data?: string;
+        lastModified?: string;
+        etag?: string;
+      }>({ action: "download", target: "legacy" });
+
+      if (!legacyResult.missing && legacyResult.data) {
+        return legacyResult.data;
+      }
+    }
+
+    return null;
   };
 
   const importFromWebDav = async () => {
@@ -319,7 +336,7 @@ export default function SyncPage() {
         return;
       }
 
-      downloadTextFile(remoteText, "questflow-webdav-backup.json");
+      downloadTextFile(remoteText, `questflow-webdav-backup-v${QUESTFLOW_COMPATIBILITY_VERSION}.json`);
       showMessage({ type: "success", text: "已下载云端存档文件。" });
     } catch (error) {
       showMessage({ type: "error", text: error instanceof Error ? error.message : "下载云端存档失败。" });
@@ -734,7 +751,7 @@ export default function SyncPage() {
               label="云端存档路径"
               value={config.filePath}
               onChange={(value) => setField("filePath", value)}
-              placeholder="questflow/questflow-backup.json"
+              placeholder={defaultBackupFilePath}
             />
           </div>
           <p className="mt-3 text-xs text-slate-500">
@@ -755,6 +772,7 @@ export default function SyncPage() {
         <PanelTitle icon={<Cloud size={18} />} title="WebDAV 存档" />
         <div className="mt-4 grid gap-3 text-sm text-slate-600">
           <InfoRow label="云端更新时间" value={remoteInfo ? formatDateTime(remoteInfo.updatedAt) : "未连接"} />
+          <InfoRow label="兼容存档版本" value={`v${QUESTFLOW_COMPATIBILITY_VERSION}`} />
           {remoteInfo ? (
             <div className="grid grid-cols-3 gap-2">
               <Metric label="Tasks" value={`${remoteInfo.tasks}`} />

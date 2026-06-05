@@ -12,6 +12,8 @@ export type SkillCheckInfo = {
   newSkill?: string;
   skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
   synergyBonus?: boolean;
+  resonanceName?: string;
+  resonanceReward?: string;
 };
 
 export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
@@ -131,7 +133,7 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
                 animate={{ scale: [0.8, 1.2, 1], opacity: 1 }}
                 className="mt-2 inline-flex items-center gap-1 rounded-full bg-purple-100 px-3 py-1 text-xs font-bold text-purple-800"
               >
-                ⚡ 队伍协同 +10 XP
+                ✨ {info.resonanceName ? `职业共鸣：${info.resonanceName} · ${info.resonanceReward}` : "职业共鸣"}
               </motion.div>
             )}
 

@@ -5,7 +5,7 @@
 ## Project Overview
 
 QuestFlow is a client-side "progress tracker" with DnD class growth and RPG quest logging.
-Core loop: push task → class XP → skill check → earn scrolls → learn/upgrade skill lines → manage fatigue → rest & summarize.
+Core loop: push task → class XP → skill check → earn scrolls → learn/upgrade skill lines → manage fatigue → trigger class resonance → rest & summarize.
 
 ## Tech Stack
 
@@ -25,10 +25,12 @@ app/
   page.tsx                 -- Main page UI, all animation queues, task CRUD, rest UI
   api/webdav/              -- WebDAV proxy route handlers
   sync/page.tsx            -- Cloud sync configuration page
+  resonance/page.tsx       -- Class resonance temple matrix / collection page
 lib/
   quest-store.ts           -- Zustand store: all state, gamification logic, migrations
 data/
   classes.ts               -- Class definitions, skill lines, skill checks, fatigue, tags, tier system
+  resonance.ts             -- 66 class resonance definitions, rewards, badges, levels, chain helpers
 components/
   SkillCheckToast.tsx      -- Skill check result toast (dice roll/success/failure/scroll/synergy)
   ScrollReveal.tsx         -- Scroll opening animation (skill reveal/tier upgrade)
@@ -43,9 +45,9 @@ public/
 - All data in browser `localStorage`, key `"questflow-v1"`
 - Zustand `persist` middleware + `createJSONStorage(() => localStorage)`
 - WebDAV sync available via `/api/webdav` proxy and `/sync` config page
-- **Persist version: 7** (migration chain: v1 → v3 → v4 → v5 → v6 → v7)
+- **Persist version: 10** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10)
 
-### Store Schema (v7)
+### Store Schema (v10)
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -58,8 +60,11 @@ public/
 | momentumCount | number | Momentum counter for current task |
 | classStates | Record\<ClassName, ClassState\> | Per-class state (xp, scrolls, skills, fatigue) |
 | lastProgressDate | string \| undefined | Last progress date (daily first-push check) |
-| lastProgressClass | ClassName \| undefined | Last class that was pushed (for synergy detection) |
+| lastProgressClass | ClassName \| undefined | Last class that was pushed (for resonance detection) |
 | restState | RestState \| undefined | Active rest (short/long, startedAt, endsAt) |
+| discoveredResonances | Record<string, DiscoveredResonance> | Unlocked class resonance combos, discovery time, trigger count |
+| resonanceBuffs | ResonanceBuffs | Pending resonance buffs: advantage/lucky/double-scroll/long-rest-scroll |
+| resonanceChain | ResonanceChainState | Consecutive cross-class progress chain counter |
 | dataUpdatedAt | string \| undefined | Last data change timestamp (for WebDAV sync) |
 | lastSyncedAt | string \| undefined | Last successful WebDAV sync timestamp |
 
@@ -101,6 +106,27 @@ type ProgressLog = {
   fatigueBefore?: number;
   fatigueAfter?: number;
   synergyBonus?: boolean;
+  resonanceKey?: string;
+  resonanceName?: string;
+  resonanceReward?: string;
+}
+
+type DiscoveredResonance = {
+  key: string;
+  discoveredAt: string;
+  triggerCount: number;
+}
+
+type ResonanceBuffs = {
+  advantageChecks: number;
+  luckyChecks: number;
+  doubleScrolls: number;
+  longRestScrolls: number;
+}
+
+type ResonanceChainState = {
+  count: number;
+  lastClass?: ClassName;
 }
 
 type RestState = {
@@ -112,7 +138,7 @@ type RestState = {
 
 ## Class System
 
-Defined in `data/classes.ts`, 5 classes each bound to a work type:
+Defined in `data/classes.ts`, 12 classes each bound to a work type/persona:
 
 | Class | Work Type | Scroll | Check Skills | Hex Color |
 |-------|-----------|--------|--------------|-----------|
@@ -121,12 +147,19 @@ Defined in `data/classes.ts`, 5 classes each bound to a work type:
 | Rogue | 客户投放 | 诡术卷轴 | 隐匿/巧手/调查/察觉 | #334155 |
 | Bard | 问题解决 | 灵感卷轴 | 说服/欺瞒/表演/历史 | #b45309 |
 | Cleric | 知识整理 | 神恩卷轴 | 宗教/医疗/洞察/说服 | #0369a1 |
+| Paladin | 守护承诺 | 誓言卷轴 | 宗教/说服/威吓/洞察 | #a16207 |
+| Ranger | 自驱追踪 | 狩猎卷轴 | 生存/自然/察觉/隐匿 | #047857 |
+| Druid | 生态平衡 | 自然卷轴 | 自然/医疗/动物驯养/洞察 | #4d7c0f |
+| Warlock | 契约协作 | 契约卷轴 | 奥术/欺瞒/威吓/宗教 | #a21caf |
+| Sorcerer | 天赋直觉 | 血脉卷轴 | 奥术/说服/洞察/威吓 | #c2410c |
+| Monk | 自律修炼 | 气脉卷轴 | 运动/察觉/洞察/杂技 | #0f766e |
+| Barbarian | 全力突破 | 狂怒卷轴 | 运动/威吓/生存/察觉 | #57534e |
 
 `CLASS_META` has both Tailwind classes (`color`, `bgColor`, `borderColor`) and `hexColor` for inline styles (avoids Tailwind dynamic class issues).
 
 ## Skill Line System
 
-Each class has 5 skill lines (SkillLine), each with 9 tier skill names. Total: 25 lines, 225 skills.
+Each class has 5 skill lines (SkillLine), each with 9 tier skill names. Total: 60 lines, 540 skills.
 
 ### Tier Formula
 
@@ -193,22 +226,41 @@ Rest flow: start → countdown (with "early finish" button) → confirmation mod
 
 Shows: per-class progress/skills/XP/scrolls today, total XP, total scrolls, streak days.
 
-## Party Synergy
+## Class Resonance System
 
-When consecutive progress actions use different classes, Party Synergy triggers:
-- +10 XP bonus
-- +1 extra scroll (capped at 3 total)
+When consecutive progress actions use different classes, Class Resonance triggers via `lastProgressClass !== currentClass`.
 
-Detected via `lastProgressClass` field in store.
+- There are 12 classes, so 66 unique unordered pair resonances (`A+B` equals `B+A`).
+- Definitions live in `data/resonance.ts` with name, badge, reward, description, and level helpers.
+- Unlocked resonances are stored in `discoveredResonances` with `discoveredAt` and `triggerCount`.
+- `/resonance` shows the Resonance Temple matrix: locked `?`, disabled same-class diagonal, unlocked badge/name/Lv.
+
+### Resonance Rewards
+
+| Reward | Effect |
+|--------|--------|
+| `xp` | +3 XP on current progress |
+| `scroll` | +1 scroll immediately |
+| `fatigue` | current class fatigue -10 after progress |
+| `advantage` | next skill check rolls with Advantage |
+| `lucky` | next skill check has +5% critical chance |
+| `doubleScroll` | next scroll reward +1 |
+| `longRestScroll` | next long rest grants +1 scroll to last-progress class |
+
+### Resonance Levels and Chain
+
+- Resonance levels are based on trigger count: Lv1=1, Lv2=5, Lv3=20, Lv4=50, Lv5=100.
+- Level-up triggers a lightweight “共鸣升级” notice in the normal resonance effect.
+- Consecutive cross-class progress increments `resonanceChain.count`; reaching x5 grants an extra scroll.
 
 ## Reward Calculation (progressTask)
 
 ```
-baseXp = round((5 + tagBonus + momentumBonus + milestoneBonus + synergyBonusXp) × fatigueMultiplier)
+baseXp = round((5 + tagBonus + momentumBonus + milestoneBonus + resonanceBonusXp) × fatigueMultiplier)
 classXpAwarded = round(5 × fatigueMultiplier)
 ```
 
-Scroll reward: success = 1, critical = 2, synergy adds +1 (max 3).
+Scroll reward: skill-check success/critical + resonance immediate scroll + double-scroll buff + chain bonus.
 
 ## Scroll Use Flow
 
@@ -225,6 +277,8 @@ All animations use refs-based queues to prevent overlap when users click rapidly
 
 - **ProgressBurst** (`+1` burst): `progressQueueRef` → `enqueueProgress()`, 1200ms per item + 180ms gap
 - **SkillCheckToast** (dice roll result): `skillCheckQueueRef` → `enqueueSkillCheck()`, 3000ms per item + 180ms gap
+- **NormalResonanceEffect**: lightweight 1s non-blocking right-side resonance animation
+- **NewResonanceModal**: 2~3s discovery modal for first-time resonance unlock
 - **ScrollReveal** (scroll opening): `scrollRevealQueueRef` (in Spellbook.tsx) → `enqueueScrollReveal()`, 2800ms per item + 180ms gap
 
 Each queue: push to ref array → `playNext*()` checks `playingRef` flag → plays → setTimeout clears → next with gap.
@@ -233,7 +287,9 @@ Each queue: push to ref array → `playNext*()` checks `playingRef` flag → pla
 
 ```
 page.tsx
-  ├── SkillCheckToast        ← skill check result (dice/success/scroll/synergy)
+  ├── SkillCheckToast        ← skill check result (dice/success/failure/scroll/resonance)
+  ├── NewResonanceModal      ← first-time resonance discovery modal
+  ├── NormalResonanceEffect  ← regular resonance trigger effect
   ├── FocusPanel             ← focused task + push button
   │   ├── TaskMapProgress    ← map region progress
   │   └── ProgressBurst      ← particle burst + XP float text
@@ -247,15 +303,18 @@ page.tsx
       └── ScrollReveal       ← scroll opening animation
 ```
 
-## Data Migration (v1→v7)
+## Data Migration (v1→v10)
 
-Zustand persist `version: 7`, `migrate` function handles:
+Zustand persist `version: 10`, `migrate` function handles:
 
 - **v1→v3**: Add totalXp, classStates, lastProgressDate; remove xp/crystals/companions/gachaHistory
 - **v3→v4**: Recalculate all skill tiers using 2^(n-1) formula
 - **v4→v5**: Skill structure from skillId to lineId, reset all skills (incompatible)
 - **v5→v6**: Add dataUpdatedAt, lastSyncedAt (WebDAV sync fields)
 - **v6→v7**: Add fatigue to class states, normalize task tags, add lastProgressClass, reset restState
+- **v7→v8**: Add 7 new classes and class states
+- **v8→v9**: Add resonance collection and pending resonance buffs
+- **v9→v10**: Add resonance chain state
 
 ## Key Conventions
 
@@ -264,3 +323,4 @@ Zustand persist `version: 7`, `migrate` function handles:
 - **Zustand for data clearing**: Use `clearAll()` action, not direct `localStorage.removeItem()` (persist middleware may rewrite on unmount).
 - **Store actions are the single source of truth**: All state mutations go through Zustand actions in `quest-store.ts`.
 - **Task class mapping**: `getTaskClass(task)` determines which class a task belongs to (from `task.className`).
+- **Resonance keys**: Always use `getResonanceKey(a, b)` so class pairs are order-independent.

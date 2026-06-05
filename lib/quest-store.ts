@@ -16,12 +16,23 @@ import {
   getLineById,
   getSkillNameAtTier,
   getTierFromCopies,
+  SKILL_LINES,
   getMapRegion,
   getFatigueMultiplier,
   getTagBonus,
   FATIGUE_PER_PROGRESS,
   SHORT_REST_RECOVERY
 } from "@/data/classes";
+import {
+  type DiscoveredResonance,
+  type ResonanceBuffs,
+  type ResonanceChainState,
+  type ResonanceTrigger,
+  RESONANCE_MAP,
+  createInitialResonanceBuffs,
+  getResonanceKey,
+  getResonanceLevel
+} from "@/data/resonance";
 
 export type QuestStatus = "active" | "paused" | "archived";
 
@@ -53,6 +64,9 @@ export type ProgressLog = {
   fatigueBefore?: number;
   fatigueAfter?: number;
   synergyBonus?: boolean;
+  resonanceKey?: string;
+  resonanceName?: string;
+  resonanceReward?: string;
 };
 
 export type ProgressResult = {
@@ -74,6 +88,7 @@ export type ProgressResult = {
   fatigueBefore?: number;
   fatigueAfter?: number;
   synergyBonus?: boolean;
+  resonance?: ResonanceTrigger;
   at: string;
 };
 
@@ -117,6 +132,9 @@ export type QuestBackup = {
   lastProgressDate?: string;
   lastSyncedAt?: string;
   lastProgressClass?: ClassName;
+  discoveredResonances?: Record<string, DiscoveredResonance>;
+  resonanceBuffs?: ResonanceBuffs;
+  resonanceChain?: ResonanceChainState;
 };
 
 type QuestStore = {
@@ -133,6 +151,9 @@ type QuestStore = {
   lastSyncedAt?: string;
   lastProgressClass?: ClassName;
   restState?: RestState;
+  discoveredResonances: Record<string, DiscoveredResonance>;
+  resonanceBuffs: ResonanceBuffs;
+  resonanceChain: ResonanceChainState;
   addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
@@ -152,6 +173,45 @@ type QuestStore = {
 const milestones = new Set([5, 10, 25, 50]);
 const milestoneXpBonus: Record<number, number> = { 5: 25, 10: 50, 25: 75, 50: 100 };
 const classNames: ClassName[] = ALL_CLASSES;
+export const QUESTFLOW_BACKUP_VERSION = 10;
+export const QUESTFLOW_COMPATIBILITY_VERSION = 10;
+
+const getSkillLineIds = () => new Set(SKILL_LINES.map((line) => line.id));
+
+const normalizeClassStates = (classStates: unknown): Record<ClassName, ClassState> => {
+  const initial = initClassState();
+  const source = classStates && typeof classStates === "object" ? classStates as Record<string, Partial<ClassState>> : {};
+  const lineIds = getSkillLineIds();
+
+  for (const cn of classNames) {
+    const item = source[cn];
+    if (!item) continue;
+    const skills = Array.isArray(item.skills)
+      ? item.skills
+        .filter((skill): skill is OwnedSkill => {
+          const candidate = skill as Partial<OwnedSkill>;
+          return typeof candidate.lineId === "string" && lineIds.has(candidate.lineId);
+        })
+        .map((skill) => {
+          const copies = Math.max(1, Math.floor(Number(skill.copies) || 1));
+          return {
+            lineId: skill.lineId,
+            copies,
+            currentTier: getTierFromCopies(copies)
+          };
+        })
+      : [];
+
+    initial[cn] = {
+      xp: Math.max(0, Math.floor(Number(item.xp) || 0)),
+      scrolls: Math.max(0, Math.floor(Number(item.scrolls) || 0)),
+      skills,
+      fatigue: Math.min(100, Math.max(0, Math.floor(Number(item.fatigue) || 0)))
+    };
+  }
+
+  return initial;
+};
 
 const isClassName = (value: unknown): value is ClassName =>
   typeof value === "string" && classNames.includes(value as ClassName);
@@ -247,7 +307,7 @@ const createBackupData = (state: QuestStore): QuestBackup => {
 
   return {
     app: "questflow",
-    version: 8,
+    version: QUESTFLOW_BACKUP_VERSION,
     exportedAt,
     updatedAt: getDerivedUpdatedAt(state) ?? exportedAt,
     tasks: state.tasks,
@@ -260,7 +320,10 @@ const createBackupData = (state: QuestStore): QuestBackup => {
     classStates: state.classStates,
     lastProgressDate: state.lastProgressDate,
     lastSyncedAt: state.lastSyncedAt,
-    lastProgressClass: state.lastProgressClass
+    lastProgressClass: state.lastProgressClass,
+    discoveredResonances: state.discoveredResonances,
+    resonanceBuffs: state.resonanceBuffs,
+    resonanceChain: state.resonanceChain
   };
 };
 
@@ -270,7 +333,7 @@ const downloadBackup = (data: QuestBackup) => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "questflow-backup.json";
+  a.download = `questflow-backup-v${QUESTFLOW_COMPATIBILITY_VERSION}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -293,6 +356,9 @@ export const useQuestStore = create<QuestStore>()(
       lastSyncedAt: undefined,
       lastProgressClass: undefined,
       restState: undefined,
+      discoveredResonances: {},
+      resonanceBuffs: createInitialResonanceBuffs(),
+      resonanceChain: { count: 0 },
 
       addTask: (rawTitle, className: ClassName = "Wizard", tags: TaskTag[] = []) => {
         const title = rawTitle.trim();
@@ -360,8 +426,29 @@ export const useQuestStore = create<QuestStore>()(
         // Tag bonus
         const tagBonus = getTagBonus(task.tags ?? []);
 
-        // Party Synergy: switching class from last progress
+        // Class resonance: switching class from last progress
         const synergyActive = !!state.lastProgressClass && state.lastProgressClass !== taskClassName;
+        const resonanceDefinition = synergyActive && state.lastProgressClass
+          ? RESONANCE_MAP[getResonanceKey(state.lastProgressClass, taskClassName)]
+          : undefined;
+        const previousDiscovery = resonanceDefinition ? state.discoveredResonances[resonanceDefinition.key] : undefined;
+        const resonance: ResonanceTrigger | undefined = resonanceDefinition
+          ? {
+              key: resonanceDefinition.key,
+              name: resonanceDefinition.name,
+              classes: resonanceDefinition.classes,
+              reward: resonanceDefinition.reward,
+              description: resonanceDefinition.description,
+              discoveredAt: previousDiscovery?.discoveredAt ?? at,
+              triggerCount: (previousDiscovery?.triggerCount ?? 0) + 1,
+              level: getResonanceLevel((previousDiscovery?.triggerCount ?? 0) + 1),
+              previousLevel: getResonanceLevel(previousDiscovery?.triggerCount ?? 0),
+              leveledUp: getResonanceLevel((previousDiscovery?.triggerCount ?? 0) + 1) > getResonanceLevel(previousDiscovery?.triggerCount ?? 0),
+              chainCount: state.resonanceChain.lastClass && state.resonanceChain.lastClass !== taskClassName ? state.resonanceChain.count + 1 : 1,
+              chainBonus: state.resonanceChain.lastClass && state.resonanceChain.lastClass !== taskClassName ? state.resonanceChain.count + 1 >= 5 : false,
+              isNew: !previousDiscovery
+            }
+          : undefined;
 
         // XP
         const momentum =
@@ -369,25 +456,36 @@ export const useQuestStore = create<QuestStore>()(
         const momentumBonus = momentum >= 3 ? 10 : 0;
         const milestone = milestones.has(progressCount) ? progressCount : undefined;
         const milestoneBonus = milestone ? (milestoneXpBonus[milestone] ?? 50) : 0;
-        const synergyBonusXp = synergyActive ? 10 : 0;
-        const baseXp = Math.round((5 + tagBonus + momentumBonus + milestoneBonus + synergyBonusXp) * fatigueMultiplier);
+        const resonanceBonusXp = resonance?.reward.type === "xp" ? 3 : 0;
+        const baseXp = Math.round((5 + tagBonus + momentumBonus + milestoneBonus + resonanceBonusXp) * fatigueMultiplier);
 
         // Class XP
         let classXpAwarded = Math.round(5 * fatigueMultiplier);
-        let scrollsAwarded = 0;
+        let scrollsAwarded = (resonance?.reward.type === "scroll" ? 1 : 0) + (resonance?.chainBonus ? 1 : 0);
+        const nextResonanceBuffs = { ...state.resonanceBuffs };
+        const forceAdvantage = nextResonanceBuffs.advantageChecks > 0;
+        const criticalBonusChance = nextResonanceBuffs.luckyChecks > 0 ? 0.05 : 0;
+
+        if (resonance?.reward.type === "advantage") nextResonanceBuffs.advantageChecks += 1;
+        if (resonance?.reward.type === "lucky") nextResonanceBuffs.luckyChecks += 1;
+        if (resonance?.reward.type === "doubleScroll") nextResonanceBuffs.doubleScrolls += 1;
+        if (resonance?.reward.type === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
 
         // Skill check (50% chance)
         let skillCheck: SkillCheckResult | undefined;
         const triggerCheck = Math.random() < 0.5;
         if (triggerCheck) {
           const classLevel = getClassLevel(state.classStates[taskClassName].xp);
-          skillCheck = rollSkillCheck(taskClassName, classLevel);
+          skillCheck = rollSkillCheck(taskClassName, classLevel, { forceAdvantage, criticalBonusChance });
+          if (forceAdvantage) nextResonanceBuffs.advantageChecks = Math.max(0, nextResonanceBuffs.advantageChecks - 1);
+          if (criticalBonusChance > 0) nextResonanceBuffs.luckyChecks = Math.max(0, nextResonanceBuffs.luckyChecks - 1);
           classXpAwarded += Math.round(skillCheck.xpBonus * fatigueMultiplier);
 
           // Scroll on success (1 for success, 2 for critical)
           if (skillCheck.scrollEarned) {
-            const scrollCount = synergyActive ? Math.min(skillCheck.scrollCount + 1, 3) : skillCheck.scrollCount;
-            scrollsAwarded = scrollCount;
+            const doubleScrollBonus = nextResonanceBuffs.doubleScrolls > 0 ? 1 : 0;
+            scrollsAwarded += skillCheck.scrollCount + doubleScrollBonus;
+            if (doubleScrollBonus > 0) nextResonanceBuffs.doubleScrolls = Math.max(0, nextResonanceBuffs.doubleScrolls - 1);
           }
         }
 
@@ -410,21 +508,36 @@ export const useQuestStore = create<QuestStore>()(
           classXpAwarded,
           progressCount,
           skillCheck,
-          scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined,
-          scrollCount: skillCheck?.scrollCount,
+          scrollEarned: scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
+          scrollCount: scrollsAwarded > 0 ? scrollsAwarded : undefined,
           fatigueBefore,
-          fatigueAfter,
-          synergyBonus: synergyActive
+          fatigueAfter: resonance?.reward.type === "fatigue" ? Math.max(0, fatigueAfter - 10) : fatigueAfter,
+          synergyBonus: synergyActive,
+          resonanceKey: resonance?.key,
+          resonanceName: resonance?.name,
+          resonanceReward: resonance?.reward.label
         };
 
         // Update class XP, scrolls and fatigue
+        const finalFatigueAfter = resonance?.reward.type === "fatigue" ? Math.max(0, fatigueAfter - 10) : fatigueAfter;
         const updatedClassStates = { ...state.classStates };
         updatedClassStates[taskClassName] = {
           ...updatedClassStates[taskClassName],
           xp: updatedClassStates[taskClassName].xp + classXpAwarded,
           scrolls: updatedClassStates[taskClassName].scrolls + scrollsAwarded,
-          fatigue: fatigueAfter
+          fatigue: finalFatigueAfter
         };
+
+        const updatedDiscoveries = resonance
+          ? {
+              ...state.discoveredResonances,
+              [resonance.key]: {
+                key: resonance.key,
+                discoveredAt: resonance.discoveredAt,
+                triggerCount: resonance.triggerCount
+              }
+            }
+          : state.discoveredResonances;
 
         set({
           tasks: state.tasks.map((item) =>
@@ -447,6 +560,9 @@ export const useQuestStore = create<QuestStore>()(
           classStates: updatedClassStates,
           lastProgressDate: firstOfDay ? today : state.lastProgressDate,
           lastProgressClass: taskClassName,
+          discoveredResonances: updatedDiscoveries,
+          resonanceBuffs: nextResonanceBuffs,
+          resonanceChain: { count: resonance?.chainCount ?? 0, lastClass: taskClassName },
           dataUpdatedAt: at
         });
 
@@ -462,11 +578,12 @@ export const useQuestStore = create<QuestStore>()(
           streak: nextStreakState.count,
           firstOfDay,
           skillCheck,
-          scrollEarned: skillCheck?.scrollEarned ? skillCheck.scrollType : undefined,
-          scrollCount: skillCheck?.scrollCount,
+          scrollEarned: scrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label) : undefined,
+          scrollCount: scrollsAwarded > 0 ? scrollsAwarded : undefined,
           fatigueBefore,
-          fatigueAfter,
+          fatigueAfter: finalFatigueAfter,
           synergyBonus: synergyActive,
+          resonance,
           at
         };
       },
@@ -529,10 +646,14 @@ export const useQuestStore = create<QuestStore>()(
             streak: data.streak ?? { count: 0 },
             momentumTaskId: data.momentumTaskId,
             momentumCount: data.momentumCount ?? 0,
-            classStates: data.classStates ?? initClassState(),
+            classStates: normalizeClassStates(data.classStates),
             lastProgressDate: data.lastProgressDate,
             dataUpdatedAt: importedUpdatedAt,
-            lastSyncedAt: options?.markSyncedAt ?? data.lastSyncedAt
+            lastSyncedAt: options?.markSyncedAt ?? data.lastSyncedAt,
+            lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined,
+            discoveredResonances: data.discoveredResonances ?? {},
+            resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs(),
+            resonanceChain: data.resonanceChain ?? { count: 0 }
           });
           return true;
         } catch {
@@ -555,7 +676,10 @@ export const useQuestStore = create<QuestStore>()(
           dataUpdatedAt: now,
           lastSyncedAt: undefined,
           lastProgressClass: undefined,
-          restState: undefined
+          restState: undefined,
+          discoveredResonances: {},
+          resonanceBuffs: createInitialResonanceBuffs(),
+          resonanceChain: { count: 0 }
         });
       },
 
@@ -596,10 +720,20 @@ export const useQuestStore = create<QuestStore>()(
               fatigue: 0
             };
           }
+          if (state.resonanceBuffs.longRestScrolls > 0) {
+            const targetClass = state.lastProgressClass ?? "Wizard";
+            updatedClassStates[targetClass] = {
+              ...updatedClassStates[targetClass],
+              scrolls: updatedClassStates[targetClass].scrolls + state.resonanceBuffs.longRestScrolls
+            };
+          }
         }
 
+        const nextResonanceBuffs = state.restState.type === "long"
+          ? { ...state.resonanceBuffs, longRestScrolls: 0 }
+          : state.resonanceBuffs;
         const now = new Date().toISOString();
-        set({ classStates: updatedClassStates, restState: undefined, dataUpdatedAt: now });
+        set({ classStates: updatedClassStates, restState: undefined, resonanceBuffs: nextResonanceBuffs, dataUpdatedAt: now });
       },
 
       cancelRest: () => {
@@ -613,7 +747,7 @@ export const useQuestStore = create<QuestStore>()(
     {
       name: "questflow-v1",
       storage: createJSONStorage(() => localStorage),
-      version: 8,
+      version: QUESTFLOW_BACKUP_VERSION,
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;
         let data = persisted;
@@ -696,6 +830,23 @@ export const useQuestStore = create<QuestStore>()(
               }
             }
           }
+        }
+
+        // v8→v9: add class resonance collection and pending resonance buffs
+        if (version < 9) {
+          data = {
+            ...data,
+            discoveredResonances: data.discoveredResonances ?? {},
+            resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs()
+          };
+        }
+
+        // v9→v10: add resonance chain counter
+        if (version < 10) {
+          data = {
+            ...data,
+            resonanceChain: data.resonanceChain ?? { count: 0 }
+          };
         }
 
         return data;

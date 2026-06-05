@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import { resolveWebDavConfig, type WebDavConfig } from "@/lib/server/webdav-config";
+import { legacyWebDavFilePath, resolveWebDavConfig, type WebDavConfig } from "@/lib/server/webdav-config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type WebDavAction = "test" | "download" | "upload";
 
+type WebDavFileTarget = "primary" | "legacy";
+
 type WebDavRequest = {
   action: WebDavAction;
   config?: Partial<WebDavConfig>;
   payload?: unknown;
+  target?: WebDavFileTarget;
 };
 
 const getAuthHeader = (config: WebDavConfig) =>
@@ -17,14 +20,17 @@ const getAuthHeader = (config: WebDavConfig) =>
 
 const trimSlashes = (value: string) => value.replace(/^\/+|\/+$/g, "");
 
-const getTargetUrl = (config: WebDavConfig) => {
+const getTargetFilePath = (config: WebDavConfig, target?: WebDavFileTarget) =>
+  target === "legacy" ? legacyWebDavFilePath : config.filePath;
+
+const getTargetUrl = (config: WebDavConfig, target?: WebDavFileTarget) => {
   const base = config.url.endsWith("/") ? config.url : `${config.url}/`;
-  const target = new URL(trimSlashes(config.filePath), base);
-  return target.toString();
+  const url = new URL(trimSlashes(getTargetFilePath(config, target)), base);
+  return url.toString();
 };
 
-const getCollectionUrls = (config: WebDavConfig) => {
-  const parts = trimSlashes(config.filePath).split("/").filter(Boolean);
+const getCollectionUrls = (config: WebDavConfig, target?: WebDavFileTarget) => {
+  const parts = trimSlashes(getTargetFilePath(config, target)).split("/").filter(Boolean);
   parts.pop();
 
   const base = config.url.endsWith("/") ? config.url : `${config.url}/`;
@@ -39,8 +45,8 @@ const getCollectionUrls = (config: WebDavConfig) => {
   return urls;
 };
 
-const ensureCollections = async (config: WebDavConfig, authHeader: string) => {
-  for (const url of getCollectionUrls(config)) {
+const ensureCollections = async (config: WebDavConfig, authHeader: string, target?: WebDavFileTarget) => {
+  for (const url of getCollectionUrls(config, target)) {
     const response = await fetch(url, {
       method: "MKCOL",
       headers: { Authorization: authHeader }
@@ -89,7 +95,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as WebDavRequest;
     const config = await resolveWebDavConfig(body.config);
     const authHeader = getAuthHeader(config);
-    const targetUrl = getTargetUrl(config);
+    const targetUrl = getTargetUrl(config, body.target);
 
     if (body.action === "test") {
       const result = await testConnection(config, authHeader);
@@ -127,7 +133,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "upload") {
-      await ensureCollections(config, authHeader);
+      await ensureCollections(config, authHeader, body.target);
       const content =
         typeof body.payload === "string"
           ? body.payload

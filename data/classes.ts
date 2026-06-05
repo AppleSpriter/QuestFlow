@@ -127,7 +127,7 @@ export const CLASS_META: Record<ClassName, {
     scrollName: "狩猎卷轴",
     checkSkills: ["生存", "自然", "察觉", "隐匿"],
     tierLabels: ["戏法", "一环", "二环", "三环", "四环", "五环", "六环", "七环", "八环", "九环"],
-    label: "目标追踪"
+    label: "自驱追踪"
   },
   Druid: {
     emoji: "🌿",
@@ -475,14 +475,24 @@ export function getSkillNameAtTier(line: SkillLine, tier: number): string {
   return line.skills[tier - 1];
 }
 
-export function rollSkillCheck(className: ClassName, classLevel: number): SkillCheckResult {
+export function rollSkillCheck(
+  className: ClassName,
+  classLevel: number,
+  options?: { forceAdvantage?: boolean; criticalBonusChance?: number }
+): SkillCheckResult {
   const meta = CLASS_META[className];
   const skillName = meta.checkSkills[Math.floor(Math.random() * meta.checkSkills.length)];
   const dc = 10 + Math.floor(Math.random() * 6);
-  const { roll, naturalRolls, advantageTriggered } = rollWeightedD20(classLevel);
+  const { roll, naturalRolls, advantageTriggered } = options?.forceAdvantage
+    ? (() => {
+        const first = Math.floor(Math.random() * 20) + 1;
+        const second = Math.floor(Math.random() * 20) + 1;
+        return { roll: Math.max(first, second), naturalRolls: [first, second], advantageTriggered: true };
+      })()
+    : rollWeightedD20(classLevel);
   const modifier = Math.floor(classLevel / 2);
   const total = roll + modifier;
-  const critical = roll === 20;
+  const critical = roll === 20 || Math.random() < (options?.criticalBonusChance ?? 0);
   const success = critical || total >= dc;
   const xpBonus = critical ? 10 : success ? 5 : 0;
   const scrollEarned = success;

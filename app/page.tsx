@@ -16,6 +16,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Sparkles,
   Target,
   Tent,
   Trophy,
@@ -46,6 +47,7 @@ import {
   LONG_REST_MINUTES
 } from "@/data/classes";
 import { TaskMapProgress } from "@/components/TaskMapProgress";
+import type { ResonanceTrigger } from "@/data/resonance";
 import { SkillCheckToast, type SkillCheckInfo } from "@/components/SkillCheckToast";
 import { Spellbook } from "@/components/Spellbook";
 
@@ -171,6 +173,11 @@ export default function QuestFlowPage() {
   const [restCountdown, setRestCountdown] = useState<number | null>(null);
   const [showRestCompleteConfirm, setShowRestCompleteConfirm] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showPartyStatus, setShowPartyStatus] = useState(true);
+  const [showAllClasses, setShowAllClasses] = useState(false);
+  const [newResonance, setNewResonance] = useState<ResonanceTrigger | null>(null);
+  const [normalResonance, setNormalResonance] = useState<ResonanceTrigger | null>(null);
+  const normalResonanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const restState = useQuestStore((state) => state.restState);
   const startShortRest = useQuestStore((state) => state.startShortRest);
@@ -214,6 +221,10 @@ export default function QuestFlowPage() {
 
   useEffect(() => { setMounted(true); }, []);
 
+  useEffect(() => () => {
+    if (normalResonanceTimerRef.current) clearTimeout(normalResonanceTimerRef.current);
+  }, []);
+
   const activeTasks = useMemo(() => tasks.filter((t) => t.status === "active"), [tasks]);
   const visibleTasks = useMemo(() => tasks.filter((t) => t.status === statusFilter), [statusFilter, tasks]);
   const focusTask = useMemo(() => tasks.find((t) => t.id === focusTaskId && t.status !== "archived"), [focusTaskId, tasks]);
@@ -222,6 +233,19 @@ export default function QuestFlowPage() {
 
   const focusRegionId = focusTask ? getMapRegion(focusTask.progressCount).id : "camp";
   const focusBg = regionBackgrounds[focusRegionId] ?? regionBackgrounds.camp;
+  const visibleClassNames = useMemo(() => {
+    const lastClass = lastProgressClass ?? focusTask?.className;
+    const ordered = [...ALL_CLASSES].sort((a, b) => {
+      if (a === lastClass) return -1;
+      if (b === lastClass) return 1;
+      const stateA = classStates[a];
+      const stateB = classStates[b];
+      const activityA = stateA.xp + stateA.scrolls * 25 + stateA.skills.length * 10 + stateA.fatigue;
+      const activityB = stateB.xp + stateB.scrolls * 25 + stateB.skills.length * 10 + stateB.fatigue;
+      return activityB - activityA;
+    });
+    return showAllClasses ? ordered : ordered.slice(0, 5);
+  }, [classStates, focusTask?.className, lastProgressClass, showAllClasses]);
 
   const createQuest = () => {
     const newTaskId = addTask(title, selectedClass, selectedTags);
@@ -295,6 +319,16 @@ export default function QuestFlowPage() {
     if (!result) return;
 
     enqueueProgress(result);
+    if (result.resonance?.isNew) {
+      setNewResonance(result.resonance);
+    } else if (result.resonance) {
+      if (normalResonanceTimerRef.current) clearTimeout(normalResonanceTimerRef.current);
+      setNormalResonance(result.resonance);
+      normalResonanceTimerRef.current = setTimeout(() => {
+        setNormalResonance(null);
+        normalResonanceTimerRef.current = null;
+      }, 1600);
+    }
 
     if (result.skillCheck) {
       enqueueSkillCheck({
@@ -303,7 +337,9 @@ export default function QuestFlowPage() {
         scrollCount: result.scrollCount,
         newSkill: result.newSkill,
         skillUpgrade: result.skillUpgrade ? { ...result.skillUpgrade, className: result.skillCheck.className } : undefined,
-        synergyBonus: result.synergyBonus
+        synergyBonus: result.synergyBonus,
+        resonanceName: result.resonance?.name,
+        resonanceReward: result.resonance?.reward.label
       });
     }
   }, [enqueueProgress, enqueueSkillCheck, progressTask]);
@@ -330,8 +366,10 @@ export default function QuestFlowPage() {
       transition={{ duration: 0.5, ease: "easeOut" }}
     >
       <AnimatePresence>
-        {focusFlash ? <FocusChangedOverlay /> : null}
-        {celebration ? <MilestoneOverlay result={celebration} /> : null}
+        {focusFlash ? <FocusChangedOverlay key="focus-flash" /> : null}
+        {celebration ? <MilestoneOverlay key={`milestone-${celebration.taskId}-${celebration.progressCount}`} result={celebration} /> : null}
+        {normalResonance ? <NormalResonanceEffect key={`normal-resonance-${normalResonance.key}-${normalResonance.triggerCount}`} resonance={normalResonance} /> : null}
+        {newResonance ? <NewResonanceModal key={`new-resonance-${newResonance.key}`} resonance={newResonance} discoveredCount={Object.keys(useQuestStore.getState().discoveredResonances).length} onClose={() => setNewResonance(null)} /> : null}
       </AnimatePresence>
 
       <SkillCheckToast info={skillCheckInfo} />
@@ -374,59 +412,111 @@ export default function QuestFlowPage() {
       </header>
 
       {/* Party Status */}
-      <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        {ALL_CLASSES.map((cn) => {
-          const meta = CLASS_META[cn];
-          const cs = classStates[cn];
-          const lvl = getClassLevel(cs.xp);
-          const currentXp = cs.xp % 100;
-          const xpPercent = Math.min(100, currentXp);
-          const scrollCount = cs.scrolls;
-          const skillCount = cs.skills.length;
-          const fatigueStage = getFatigueStage(cs.fatigue);
-          const stageMeta = FATIGUE_STAGE_META[fatigueStage];
-          return (
-            <div key={cn} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${classStyles[cn]}`}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <span>{meta.emoji}</span>
-                  <span className="truncate">{cn} Lv{lvl}</span>
-                </div>
-                <div className="flex shrink-0 items-center gap-1 opacity-70">
-                  {scrollCount > 0 && <span>📜{scrollCount}</span>}
-                  {skillCount > 0 && <span>✨{skillCount}</span>}
-                </div>
+      <section className="mb-3 rounded-xl border border-slate-200 bg-white/75 p-2 shadow-sm backdrop-blur">
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Party Status</div>
+            <div className="text-xs font-medium text-slate-500">优先显示最近完成职业，其余按活跃度排序</div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {showPartyStatus ? (
+              <button
+                type="button"
+                onClick={() => setShowAllClasses((value) => !value)}
+                className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97]"
+              >
+                {showAllClasses ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {showAllClasses ? "显示 5 个" : `展开全部 ${ALL_CLASSES.length}`}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setShowPartyStatus((value) => !value)}
+              className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97]"
+            >
+              {showPartyStatus ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              {showPartyStatus ? "收起" : "展开"}
+            </button>
+          </div>
+        </div>
+        <AnimatePresence initial={false}>
+          {showPartyStatus ? (
+            <motion.div
+              key="party-status-grid"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="overflow-hidden"
+            >
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                <AnimatePresence initial={false}>
+                  {visibleClassNames.map((cn) => {
+                    const meta = CLASS_META[cn];
+                    const cs = classStates[cn];
+                    const lvl = getClassLevel(cs.xp);
+                    const currentXp = cs.xp % 100;
+                    const xpPercent = Math.min(100, currentXp);
+                    const scrollCount = cs.scrolls;
+                    const skillCount = cs.skills.length;
+                    const fatigueStage = getFatigueStage(cs.fatigue);
+                    const stageMeta = FATIGUE_STAGE_META[fatigueStage];
+                    return (
+                      <motion.div
+                        layout
+                        key={cn}
+                        initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                        transition={{ duration: 0.18, ease: "easeOut" }}
+                        className={`rounded-lg border px-3 py-2 text-xs font-semibold ${classStyles[cn]}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span>{meta.emoji}</span>
+                            <span className="truncate">{cn} Lv{lvl}</span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1 opacity-70">
+                            {cn === lastProgressClass && <span className="rounded-full bg-white/80 px-1.5 text-[10px] font-black">最近</span>}
+                            {scrollCount > 0 && <span>📜{scrollCount}</span>}
+                            {skillCount > 0 && <span>✨{skillCount}</span>}
+                          </div>
+                        </div>
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <span className="shrink-0 text-[10px] opacity-60">XP</span>
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
+                            <motion.div
+                              className="h-full rounded-full bg-current opacity-70"
+                              initial={false}
+                              animate={{ width: `${xpPercent}%` }}
+                              transition={{ duration: 0.45, ease: "easeOut" }}
+                            />
+                          </div>
+                          <span className="shrink-0 text-[10px] opacity-70">{currentXp}/100</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
+                          <span className="shrink-0 text-[10px] opacity-60">{stageMeta.emoji}</span>
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
+                            <motion.div
+                              key={`${cn}-fatigue-${fatigueStage}`}
+                              className="h-full rounded-full"
+                              style={{ backgroundColor: stageMeta.color }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${cs.fatigue}%` }}
+                              transition={{ duration: 0.45, ease: "easeOut" }}
+                            />
+                          </div>
+                          <span className="shrink-0 text-[10px] opacity-70">{cs.fatigue}%</span>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
               </div>
-              <div className="mt-1.5 flex items-center gap-2">
-                <span className="shrink-0 text-[10px] opacity-60">XP</span>
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
-                  <motion.div
-                    className="h-full rounded-full bg-current opacity-70"
-                    initial={false}
-                    animate={{ width: `${xpPercent}%` }}
-                    transition={{ duration: 0.45, ease: "easeOut" }}
-                  />
-                </div>
-                <span className="shrink-0 text-[10px] opacity-70">{currentXp}/100</span>
-              </div>
-              <div className="mt-1 flex items-center gap-2">
-                <span className="shrink-0 text-[10px] opacity-60">{stageMeta.emoji}</span>
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/70">
-                  <motion.div
-                    key={`${cn}-fatigue-${fatigueStage}`}
-                    className="h-full rounded-full"
-                    style={{ backgroundColor: stageMeta.color }}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${cs.fatigue}%` }}
-                    transition={{ duration: 0.45, ease: "easeOut" }}
-                  />
-                </div>
-                <span className="shrink-0 text-[10px] opacity-70">{cs.fatigue}%</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+      </section>
 
       {/* Action bar */}
       <div className="mb-3 flex flex-wrap gap-2">
@@ -438,6 +528,13 @@ export default function QuestFlowPage() {
           <BookOpen size={16} />
           Spellbook
         </button>
+        <Link
+          href="/resonance"
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm font-semibold text-purple-700 transition hover:bg-purple-100 active:scale-[0.97]"
+        >
+          <Sparkles size={16} />
+          共鸣圣殿
+        </Link>
         {restState ? (
           <div className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
             {restState.type === "short" ? <Coffee size={16} /> : <Tent size={16} />}
@@ -833,15 +930,15 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-20">
-      {Array.from({ length: 3 }).map((_, i) => (
+      {Array.from({ length: 2 }).map((_, i) => (
         <motion.div key={`glow-${i}`} className="glow-burst" style={{ "--particle-color": baseColor } as CSSProperties}
-          initial={{ left: "68%", top: "62%", width: 0, height: 0, opacity: 0.6 }}
-          animate={{ width: [0, 120 + i * 40], height: [0, 120 + i * 40], opacity: [0.6, 0], x: [0, -(60 + i * 20)], y: [0, -(60 + i * 20)] }}
-          transition={{ duration: 0.7, ease: "easeOut", delay: i * 0.08 }} />
+          initial={{ left: "68%", top: "62%", width: 0, height: 0, opacity: 0.5 }}
+          animate={{ width: [0, 110 + i * 34], height: [0, 110 + i * 34], opacity: [0.5, 0], x: [0, -(55 + i * 17)], y: [0, -(55 + i * 17)] }}
+          transition={{ duration: 0.62, ease: "easeOut", delay: i * 0.07 }} />
       ))}
-      {Array.from({ length: 24 }).map((_, index) => {
-        const angle = (Math.PI * 2 * index) / 24 + (index % 2 === 0 ? 0.15 : -0.15);
-        const distance = 75 + (index % 6) * 14;
+      {Array.from({ length: 16 }).map((_, index) => {
+        const angle = (Math.PI * 2 * index) / 16 + (index % 2 === 0 ? 0.15 : -0.15);
+        const distance = 68 + (index % 4) * 14;
         return (
           <motion.span key={`outer-${index}`} className={particleTypes[index % particleTypes.length]}
             style={{ "--particle-color": colors[index % colors.length] } as CSSProperties}
@@ -850,15 +947,15 @@ function ProgressBurst({ result }: { result: ProgressResult }) {
             transition={{ duration: 0.9, ease: "easeOut" }} />
         );
       })}
-      {Array.from({ length: 12 }).map((_, index) => {
-        const angle = (Math.PI * 2 * index) / 12 + 0.3;
-        const distance = 35 + (index % 3) * 12;
+      {Array.from({ length: 8 }).map((_, index) => {
+        const angle = (Math.PI * 2 * index) / 8 + 0.3;
+        const distance = 32 + (index % 3) * 10;
         return (
           <motion.span key={`inner-${index}`} className="particle-star"
             style={{ "--particle-color": colors[(index + 2) % colors.length] } as CSSProperties}
             initial={{ left: "68%", top: "62%", opacity: 1, scale: 0, x: 0, y: 0 }}
             animate={{ opacity: [1, 1, 0], scale: [0, 1.6, 0.4], x: Math.cos(angle) * distance, y: Math.sin(angle) * distance, rotate: [0, 360] }}
-            transition={{ duration: 1.1, ease: "easeOut", delay: 0.05 }} />
+            transition={{ duration: 0.9, ease: "easeOut", delay: 0.04 }} />
         );
       })}
 
@@ -1014,6 +1111,124 @@ function EmptyState({ status }: { status: QuestStatus }) {
         <p className="mt-2 text-sm font-medium text-slate-600">{text}</p>
       </div>
     </div>
+  );
+}
+
+function NormalResonanceEffect({ resonance }: { resonance: ResonanceTrigger }) {
+  const [firstClass, secondClass] = resonance.classes;
+  return (
+    <motion.div
+      className="pointer-events-none fixed right-5 top-24 z-40 w-72 rounded-3xl border border-purple-200 bg-white/95 p-4 shadow-2xl backdrop-blur will-change-transform"
+      initial={{ opacity: 0, x: 36, scale: 0.96 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 28, scale: 0.98 }}
+      transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <motion.div
+        className="absolute inset-0 rounded-3xl bg-gradient-to-br from-purple-100/70 via-white/0 to-amber-100/70"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: [0.35, 0.65, 0.35] }}
+        transition={{ duration: 1.2, ease: "easeInOut" }}
+      />
+      <div className="relative">
+        <div className="flex items-center justify-center gap-8 text-3xl">
+          <motion.span animate={{ x: [0, 16, 12], scale: [1, 1.08, 1] }} transition={{ duration: 0.52, ease: "easeOut" }}>{CLASS_META[firstClass].emoji}</motion.span>
+          <motion.span animate={{ x: [0, -16, -12], scale: [1, 1.08, 1] }} transition={{ duration: 0.52, ease: "easeOut" }}>{CLASS_META[secondClass].emoji}</motion.span>
+        </div>
+        <motion.div className="mt-1 text-center text-xl font-black text-purple-600" initial={{ opacity: 0, y: 6, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ delay: 0.16, duration: 0.24, ease: "easeOut" }}>
+          ✨ 职业共鸣
+        </motion.div>
+        <motion.div className="mt-1 text-center" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28, duration: 0.22, ease: "easeOut" }}>
+          <div className="text-lg font-black text-slate-950">{resonance.reward.emoji} {resonance.name}</div>
+          <div className="text-sm font-bold text-amber-700">{resonance.reward.shortLabel}</div>
+          {resonance.leveledUp ? <div className="mt-1 text-xs font-bold text-violet-600">✨ 共鸣升级 Lv{resonance.previousLevel} → Lv{resonance.level}</div> : null}
+          {resonance.chainCount > 1 ? <div className="mt-1 text-xs font-black text-fuchsia-600">⚡ 共鸣链 x{resonance.chainCount}{resonance.chainBonus ? " · 额外卷轴 ×1" : ""}</div> : null}
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
+function NewResonanceModal({ resonance, discoveredCount, onClose }: { resonance: ResonanceTrigger; discoveredCount: number; onClose: () => void }) {
+  const [firstClass, secondClass] = resonance.classes;
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 backdrop-blur-sm"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/80 bg-white p-6 text-center shadow-2xl"
+        initial={{ opacity: 0, scale: 0.82, y: 24 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.94, y: 12 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+      >
+        <motion.div
+          className="absolute inset-0 bg-gradient-to-br from-violet-100/80 via-transparent to-amber-100/80"
+          animate={{ opacity: [0.5, 0.9, 0.55] }}
+          transition={{ duration: 2.4, repeat: Infinity }}
+        />
+        <div className="relative">
+          <div className="font-mono text-xs font-black tracking-[0.18em] text-violet-400">═══════════════</div>
+          <div className="text-sm font-black tracking-[0.25em] text-violet-500">✨ 新共鸣发现</div>
+          <div className="font-mono text-xs font-black tracking-[0.18em] text-violet-400">═══════════════</div>
+          <div className="mt-5 flex items-center justify-center gap-6">
+            {[firstClass, secondClass].map((cn, index) => (
+              <motion.div
+                key={cn}
+                className="flex h-20 w-20 flex-col items-center justify-center rounded-3xl border bg-white shadow-lg"
+                style={{ borderColor: CLASS_META[cn].hexColor }}
+                initial={{ x: index === 0 ? -80 : 80, opacity: 0, rotate: index === 0 ? -12 : 12 }}
+                animate={{ x: 0, opacity: 1, rotate: 0 }}
+                transition={{ delay: 0.12 + index * 0.08, type: "spring", stiffness: 180, damping: 14 }}
+              >
+                <span className="text-3xl">{CLASS_META[cn].emoji}</span>
+                <span className="mt-1 text-xs font-bold text-slate-600">{cn}</span>
+              </motion.div>
+            ))}
+          </div>
+          <motion.div
+            className="mt-4 text-4xl"
+            initial={{ opacity: 0, scale: 0.4 }}
+            animate={{ opacity: [0, 1, 0.75], scale: [0.4, 1.5, 1], rotate: [0, 10, 0] }}
+            transition={{ delay: 0.34, duration: 0.38 }}
+          >
+            ⚡
+          </motion.div>
+          <motion.h2
+            className="mt-2 text-3xl font-black text-slate-950"
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: [0.85, 1.08, 1] }}
+            transition={{ delay: 0.52, duration: 0.45 }}
+          >
+            {resonance.reward.emoji} {resonance.name}
+          </motion.h2>
+          <div className="mt-3 inline-flex rounded-full bg-violet-100 px-4 py-2 text-sm font-bold text-violet-700">
+            奖励：{resonance.reward.emoji} {resonance.reward.shortLabel}
+          </div>
+          <p className="mt-3 text-sm font-bold text-emerald-600">已收录至共鸣圣殿 · 进度 {discoveredCount} / 66</p>
+          <p className="mt-4 text-sm leading-6 text-slate-600">{resonance.description}</p>
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <Link
+              href="/resonance"
+              onClick={onClose}
+              className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800 active:scale-[0.98]"
+            >
+              查看详情
+            </Link>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98]"
+            >
+              继续冒险
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
