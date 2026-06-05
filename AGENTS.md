@@ -385,7 +385,7 @@ Zustand persist `version: 13`, `migrate` function handles:
 - **Animation queues**: Never set animation state directly on user action; always enqueue via refs to prevent overlap.
 - **Zustand for data clearing**: Use `clearAll()` action, not direct `localStorage.removeItem()` (persist middleware may rewrite on unmount).
 - **Store actions are the single source of truth**: All state mutations go through Zustand actions in `quest-store.ts`.
-- **Active task ordering**: `progressTask()` appends the progressed task to the end of `tasks` and updates `lastFocusedAt`; the quick active-task selector sorts by `createdAt` so it stays stable for finding tasks.
+- **Active task ordering**: `setFocusTask()` only changes `focusTaskId` and must not reorder tasks; `progressTask()` appends the progressed task to the end of `tasks` and updates `lastFocusedAt`; the quick active-task selector sorts by `createdAt` so it stays stable for finding tasks.
 - **Task class mapping**: `getTaskClass(task)` determines which class a task belongs to (from `task.className`).
 - **Resonance keys**: Always use `getResonanceKey(a, b)` so class pairs are order-independent.
 - **WebDAV sync**: Use `/api/webdav` route handlers and `lib/server/webdav-config.ts`; do not call WebDAV directly from client components.

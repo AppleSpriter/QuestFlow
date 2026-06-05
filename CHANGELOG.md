@@ -23,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Progress、技能检定、卷轴、共鸣、休息奖励接入专长加成
 - Party Status 改为默认展示 4 个职业，支持展开/收起和 hover 查看职业详情，避免 Build/卷轴信息遮挡职业名与等级
 - 当前专注区域保留完整地图进度条，底部任务卡改为紧凑区域胶囊，避免后期地图过长溢出
-- Active 任务卡在推进后移动到列表底部，快速任务选取栏保持按创建时间固定排序，便于查找任务
+- Active 任务卡仅在推进后移动到列表底部，单纯追踪/切换专注不改变位置；快速任务选取栏保持按创建时间固定排序，便于查找任务
 - README、AGENTS 文档同步更新为 v1.8 / persist v13
 
 ### Fixed

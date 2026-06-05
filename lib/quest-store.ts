@@ -566,10 +566,8 @@ export const useQuestStore = create<QuestStore>()(
         set((state) => {
           const selectedTask = state.tasks.find((task) => task.id === taskId);
           if (!selectedTask) return state;
-          const nextTask = { ...selectedTask, lastFocusedAt: now };
           return {
             focusTaskId: taskId,
-            tasks: [...state.tasks.filter((task) => task.id !== taskId), nextTask],
             dataUpdatedAt: now
           };
         });

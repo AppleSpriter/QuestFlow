@@ -44,10 +44,10 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
     <AnimatePresence>
       {info ? (
         <motion.div
-          className="pointer-events-none fixed left-1/2 top-16 z-50 -translate-x-1/2"
-          initial={{ opacity: 0, y: -20, scale: 0.9 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -10, scale: 0.95 }}
+          className="pointer-events-none fixed left-1/2 top-16 z-50"
+          initial={{ opacity: 0, x: "-50%", y: -20, scale: 0.9 }}
+          animate={{ opacity: 1, x: "-50%", y: 0, scale: 1 }}
+          exit={{ opacity: 0, x: "-50%", y: -10, scale: 0.95 }}
           transition={{ duration: 0.3 }}
         >
           <div className={`rounded-xl border px-5 py-3 shadow-lg transition-colors duration-300 ${
