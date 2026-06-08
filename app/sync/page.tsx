@@ -129,7 +129,7 @@ const cleanCell = (value: string | number | undefined) =>
     .trim();
 
 const formatProcessLogRows = (task: QuestTask, taskLogs: ProgressLog[]) => {
-  const header = ["推进时间", "事件", "职业", "Progress", "XP", "职业XP", "卷轴", "技能检定", "疲劳", "共鸣", "备注"].join("\t");
+  const header = ["推进时间", "事件", "职业", "Progress", "XP", "职业XP", "卷轴", "技能检定", "疲劳", "共鸣", "标签", "备注"].join("\t");
   const rows = taskLogs
     .slice()
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
@@ -157,6 +157,7 @@ const formatProcessLogRows = (task: QuestTask, taskLogs: ProgressLog[]) => {
         skillCheck,
         fatigue,
         log.resonanceName ? `${log.resonanceName}${log.resonanceReward ? `（${log.resonanceReward}）` : ""}` : "",
+        log.progressTags?.map((tag) => tag.name).join(" / "),
         log.note
       ].map(cleanCell).join("\t");
     });

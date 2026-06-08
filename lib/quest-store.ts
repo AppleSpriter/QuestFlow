@@ -61,6 +61,47 @@ const localStorageProvider = () => {
 
 export type QuestStatus = "active" | "paused" | "archived";
 export type ProgressLogType = "progress" | "scroll";
+export type ProgressTagColorId = "blue" | "emerald" | "violet" | "amber" | "rose" | "sky" | "slate" | "fuchsia" | "cyan" | "lime" | "orange" | "indigo" | "pink";
+
+export type ProgressTagColorMeta = {
+  id: ProgressTagColorId;
+  label: string;
+  textColor: string;
+  bgColor: string;
+  borderColor: string;
+};
+
+export type ProgressTag = {
+  id: string;
+  name: string;
+  colorId: ProgressTagColorId;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProgressTagSnapshot = {
+  id: string;
+  name: string;
+  colorId: ProgressTagColorId;
+};
+
+export const PROGRESS_TAG_COLORS: Record<ProgressTagColorId, ProgressTagColorMeta> = {
+  blue: { id: "blue", label: "星河蓝", textColor: "#1d4ed8", bgColor: "#dbeafe", borderColor: "#60a5fa" },
+  emerald: { id: "emerald", label: "翡翠绿", textColor: "#047857", bgColor: "#d1fae5", borderColor: "#34d399" },
+  violet: { id: "violet", label: "秘法紫", textColor: "#6d28d9", bgColor: "#ede9fe", borderColor: "#a78bfa" },
+  amber: { id: "amber", label: "鎏金黄", textColor: "#b45309", bgColor: "#fef3c7", borderColor: "#f59e0b" },
+  rose: { id: "rose", label: "蔷薇红", textColor: "#be123c", bgColor: "#ffe4e6", borderColor: "#fb7185" },
+  sky: { id: "sky", label: "电光青", textColor: "#0369a1", bgColor: "#e0f2fe", borderColor: "#38bdf8" },
+  slate: { id: "slate", label: "月影灰", textColor: "#475569", bgColor: "#f1f5f9", borderColor: "#94a3b8" },
+  fuchsia: { id: "fuchsia", label: "霓虹粉紫", textColor: "#a21caf", bgColor: "#fae8ff", borderColor: "#e879f9" },
+  cyan: { id: "cyan", label: "赛博青", textColor: "#0e7490", bgColor: "#cffafe", borderColor: "#22d3ee" },
+  lime: { id: "lime", label: "荧光绿", textColor: "#4d7c0f", bgColor: "#ecfccb", borderColor: "#a3e635" },
+  orange: { id: "orange", label: "熔岩橙", textColor: "#c2410c", bgColor: "#ffedd5", borderColor: "#fb923c" },
+  indigo: { id: "indigo", label: "深空靛", textColor: "#4338ca", bgColor: "#e0e7ff", borderColor: "#818cf8" },
+  pink: { id: "pink", label: "糖果粉", textColor: "#be185d", bgColor: "#fce7f3", borderColor: "#f472b6" }
+};
+
+export const DEFAULT_PROGRESS_TAG_COLOR: ProgressTagColorId = "blue";
 
 export type QuestTodoItem = {
   id: string;
@@ -105,6 +146,7 @@ export type ProgressLog = {
   resonanceReward?: string;
   todoId?: string;
   todoTitle?: string;
+  progressTags?: ProgressTagSnapshot[];
 };
 
 export type ProgressResult = {
@@ -175,6 +217,13 @@ export type QuestBackup = {
   resonanceBuffs?: ResonanceBuffs;
   resonanceChain?: ResonanceChainState;
   featState?: FeatState;
+  progressTags?: ProgressTag[];
+};
+
+export type ProgressTaskOptions = {
+  note?: string;
+  todo?: QuestTodoItem;
+  progressTagIds?: string[];
 };
 
 type QuestStore = {
@@ -195,13 +244,17 @@ type QuestStore = {
   resonanceBuffs: ResonanceBuffs;
   resonanceChain: ResonanceChainState;
   featState: FeatState;
+  progressTags: ProgressTag[];
   addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
   addTaskTodo: (taskId: string, title: string) => string | null;
   reorderTaskTodo: (taskId: string, todoId: string, targetTodoId: string) => void;
   toggleTaskTodo: (taskId: string, todoId: string) => ProgressResult | null;
-  progressTask: (taskId: string, note?: string, todo?: QuestTodoItem) => ProgressResult | null;
+  progressTask: (taskId: string, options?: string | ProgressTaskOptions, todo?: QuestTodoItem) => ProgressResult | null;
+  addProgressTag: (name: string, colorId?: ProgressTagColorId) => string | null;
+  updateProgressTag: (tagId: string, updates: { name?: string; colorId?: ProgressTagColorId }) => boolean;
+  deleteProgressTag: (tagId: string) => void;
   useScroll: (className: ClassName) => { lineId: string; isNew: boolean; upgraded: boolean; fromTier: number; toTier: number } | null;
   startShortRest: () => void;
   startLongRest: () => void;
@@ -216,8 +269,8 @@ type QuestStore = {
 };
 
 const classNames: ClassName[] = ALL_CLASSES;
-export const QUESTFLOW_BACKUP_VERSION = 13;
-export const QUESTFLOW_COMPATIBILITY_VERSION = 13;
+export const QUESTFLOW_BACKUP_VERSION = 14;
+export const QUESTFLOW_COMPATIBILITY_VERSION = 14;
 
 const getSkillLineIds = () => new Set(SKILL_LINES.map((line) => line.id));
 
@@ -272,6 +325,47 @@ const normalizeClassStates = (classStates: unknown): Record<ClassName, ClassStat
 
 const isClassName = (value: unknown): value is ClassName =>
   typeof value === "string" && classNames.includes(value as ClassName);
+
+const isProgressTagColorId = (value: unknown): value is ProgressTagColorId =>
+  typeof value === "string" && value in PROGRESS_TAG_COLORS;
+
+const normalizeProgressTags = (tags: unknown): ProgressTag[] => {
+  if (!Array.isArray(tags)) return [];
+  const seen = new Set<string>();
+
+  return tags.reduce<ProgressTag[]>((items, tag) => {
+    const item = tag as Partial<ProgressTag>;
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!name) return items;
+    const id = typeof item.id === "string" && item.id ? item.id : makeId();
+    if (seen.has(id)) return items;
+    seen.add(id);
+    const createdAt = typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString();
+    items.push({
+      id,
+      name,
+      colorId: isProgressTagColorId(item.colorId) ? item.colorId : DEFAULT_PROGRESS_TAG_COLOR,
+      createdAt,
+      updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : createdAt
+    });
+    return items;
+  }, []);
+};
+
+const normalizeProgressTagSnapshots = (tags: unknown): ProgressTagSnapshot[] => {
+  if (!Array.isArray(tags)) return [];
+  return tags.reduce<ProgressTagSnapshot[]>((items, tag) => {
+    const item = tag as Partial<ProgressTagSnapshot>;
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!name || typeof item.id !== "string") return items;
+    items.push({
+      id: item.id,
+      name,
+      colorId: isProgressTagColorId(item.colorId) ? item.colorId : DEFAULT_PROGRESS_TAG_COLOR
+    });
+    return items;
+  }, []);
+};
 
 const normalizeFeatState = (featState: unknown): FeatState => {
   const initial = createInitialFeatState();
@@ -434,7 +528,8 @@ const normalizeLogs = (logs: unknown, tasks: QuestTask[] = []): ProgressLog[] =>
       resonanceName: typeof item.resonanceName === "string" ? item.resonanceName : undefined,
       resonanceReward: typeof item.resonanceReward === "string" ? item.resonanceReward : undefined,
       todoId: typeof item.todoId === "string" ? item.todoId : undefined,
-      todoTitle: typeof item.todoTitle === "string" ? item.todoTitle : undefined
+      todoTitle: typeof item.todoTitle === "string" ? item.todoTitle : undefined,
+      progressTags: normalizeProgressTagSnapshots(item.progressTags)
     };
   });
 };
@@ -512,7 +607,8 @@ const createBackupData = (state: QuestStore): QuestBackup => {
     discoveredResonances: state.discoveredResonances,
     resonanceBuffs: state.resonanceBuffs,
     resonanceChain: state.resonanceChain,
-    featState: state.featState
+    featState: state.featState,
+    progressTags: state.progressTags
   };
 };
 
@@ -549,6 +645,7 @@ export const useQuestStore = create<QuestStore>()(
       resonanceBuffs: createInitialResonanceBuffs(),
       resonanceChain: { count: 0 },
       featState: createInitialFeatState(),
+      progressTags: [],
 
       addTask: (rawTitle, className: ClassName = "Wizard", tags: TaskTag[] = []) => {
         const title = rawTitle.trim();
@@ -644,7 +741,7 @@ export const useQuestStore = create<QuestStore>()(
         if (!task || !todo) return null;
 
         if (!todo.completedAt) {
-          return get().progressTask(taskId, todo.title, todo);
+          return get().progressTask(taskId, { note: todo.title, todo });
         }
 
         const now = new Date().toISOString();
@@ -665,10 +762,19 @@ export const useQuestStore = create<QuestStore>()(
         return null;
       },
 
-      progressTask: (taskId, rawNote, completedTodo) => {
+      progressTask: (taskId, options, legacyTodo) => {
         const state = get();
         const task = state.tasks.find((item) => item.id === taskId);
         if (!task || task.status === "archived") return null;
+        const progressOptions: ProgressTaskOptions = typeof options === "string"
+          ? { note: options, todo: legacyTodo }
+          : options ?? {};
+        const selectedProgressTags = (progressOptions.progressTagIds ?? []).reduce<ProgressTagSnapshot[]>((items, tagId) => {
+          if (items.some((item) => item.id === tagId)) return items;
+          const tag = state.progressTags.find((item) => item.id === tagId);
+          if (tag) items.push({ id: tag.id, name: tag.name, colorId: tag.colorId });
+          return items;
+        }, []);
 
         const now = new Date();
         const at = now.toISOString();
@@ -805,7 +911,8 @@ export const useQuestStore = create<QuestStore>()(
         const totalScrollsAwarded = reward.scrollsAwarded + featScrollBonus;
         const nextStreakState = nextStreak(state.streak, now);
         const firstOfDay = state.lastProgressDate !== today;
-        const note = rawNote?.trim() || "推进一步";
+        const completedTodo = progressOptions.todo;
+        const note = progressOptions.note?.trim() || selectedProgressTags.map((tag) => tag.name).join(" · ") || "推进一步";
 
         const log: ProgressLog = {
           id: makeId(),
@@ -827,7 +934,8 @@ export const useQuestStore = create<QuestStore>()(
           resonanceName: resonance?.name,
           resonanceReward: resonance?.reward.label,
           todoId: completedTodo?.id,
-          todoTitle: completedTodo?.title
+          todoTitle: completedTodo?.title,
+          progressTags: selectedProgressTags
         };
 
         const updatedClassStates = { ...state.classStates };
@@ -903,6 +1011,57 @@ export const useQuestStore = create<QuestStore>()(
           resonance,
           at
         };
+      },
+
+      addProgressTag: (rawName, colorId = DEFAULT_PROGRESS_TAG_COLOR) => {
+        const name = rawName.trim();
+        if (!name) return null;
+        const now = new Date().toISOString();
+        const tag: ProgressTag = {
+          id: makeId(),
+          name,
+          colorId: isProgressTagColorId(colorId) ? colorId : DEFAULT_PROGRESS_TAG_COLOR,
+          createdAt: now,
+          updatedAt: now
+        };
+        set((state) => ({
+          progressTags: [tag, ...state.progressTags],
+          dataUpdatedAt: now
+        }));
+        return tag.id;
+      },
+
+      updateProgressTag: (tagId, updates) => {
+        const name = updates.name?.trim();
+        const now = new Date().toISOString();
+        let changed = false;
+        set((state) => ({
+          progressTags: state.progressTags.map((tag) => {
+            if (tag.id !== tagId) return tag;
+            changed = true;
+            return {
+              ...tag,
+              name: name || tag.name,
+              colorId: isProgressTagColorId(updates.colorId) ? updates.colorId : tag.colorId,
+              updatedAt: now
+            };
+          }),
+          dataUpdatedAt: changed ? now : state.dataUpdatedAt
+        }));
+        return changed;
+      },
+
+      deleteProgressTag: (tagId) => {
+        const now = new Date().toISOString();
+        let changed = false;
+        set((state) => ({
+          progressTags: state.progressTags.filter((tag) => {
+            if (tag.id !== tagId) return true;
+            changed = true;
+            return false;
+          }),
+          dataUpdatedAt: changed ? now : state.dataUpdatedAt
+        }));
       },
 
       useScroll: (className: ClassName) => {
@@ -1010,7 +1169,8 @@ export const useQuestStore = create<QuestStore>()(
             discoveredResonances: data.discoveredResonances ?? {},
             resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs(),
             resonanceChain: data.resonanceChain ?? { count: 0 },
-            featState: refreshPendingFeatChoices(normalizeClassStates(data.classStates), normalizeFeatState(data.featState), now)
+            featState: refreshPendingFeatChoices(normalizeClassStates(data.classStates), normalizeFeatState(data.featState), now),
+            progressTags: normalizeProgressTags(data.progressTags)
           });
           return true;
         } catch {
@@ -1037,7 +1197,8 @@ export const useQuestStore = create<QuestStore>()(
           discoveredResonances: {},
           resonanceBuffs: createInitialResonanceBuffs(),
           resonanceChain: { count: 0 },
-          featState: createInitialFeatState()
+          featState: createInitialFeatState(),
+          progressTags: []
         });
       },
 
@@ -1280,6 +1441,17 @@ export const useQuestStore = create<QuestStore>()(
             ...data,
             classStates,
             featState: refreshPendingFeatChoices(classStates, normalizeFeatState(data.featState), new Date().toISOString())
+          };
+        }
+
+        // v13→v14: add reusable progress tags and tag snapshots on progress logs.
+        if (version < 14) {
+          const tasks = normalizeTasks(data.tasks);
+          data = {
+            ...data,
+            tasks,
+            logs: normalizeLogs(data.logs, tasks),
+            progressTags: normalizeProgressTags(data.progressTags)
           };
         }
 

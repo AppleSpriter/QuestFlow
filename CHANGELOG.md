@@ -17,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - 新增自动 Build 识别：命运编织者、博学者、执行大师、共鸣大师、收藏宗师、荒野旅者、Spellblade、奥术诡术师、Agent Architect
 - 新增专长二次确认流程：先选卡片再确认，避免误触永久选择
 - 新增稍后选择能力：可关闭专长选择弹窗，并在 `/build` 页面继续处理待选专长
+- 新增 `/tags` 页面，可配置常用 Progress 标签并从预设颜色中选择样式
+- 首页当前专注推进区支持选择 Progress 标签，日志保存标签快照，导出事件 Log 时包含标签列
 
 ### Changed
 
@@ -24,11 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Party Status 改为默认展示 4 个职业，支持展开/收起和 hover 查看职业详情，避免 Build/卷轴信息遮挡职业名与等级
 - 当前专注区域保留完整地图进度条，底部任务卡改为紧凑区域胶囊，避免后期地图过长溢出
 - Active 任务卡仅在推进后移动到列表底部，单纯追踪/切换专注不改变位置；快速任务选取栏保持按创建时间固定排序，便于查找任务
-- README、AGENTS 文档同步更新为 v1.8 / persist v13
+- README、AGENTS 文档同步更新为 v1.8 / persist v14
 
 ### Fixed
 
-- 数据迁移至 v13：为历史存档补齐 FeatState、待选择专长、短休/长休计数，并将 WebDAV 默认存档后缀升级为 v13
+- 数据迁移至 v13：为历史存档补齐 FeatState、待选择专长、短休/长休计数
+- 数据迁移至 v14：为历史存档补齐 Progress 标签集合与日志标签快照，并将 WebDAV 默认存档后缀升级为 v14
 - 修正专长/Build 展示与实际奖励不一致的问题：坚定意志、精力管理、共鸣核心、联动专家、双卷轴和社交达人现在与实际逻辑一致
 - 修正新触发双卷轴共鸣会在同一次 Progress 被立即消耗的问题，现在只影响下一次卷轴奖励
 

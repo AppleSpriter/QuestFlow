@@ -21,6 +21,7 @@ import {
   Plus,
   RotateCcw,
   Sparkles,
+  Tags,
   Target,
   Tent,
   Trophy,
@@ -29,9 +30,12 @@ import {
 import type { CSSProperties, DragEvent, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_PROGRESS_TAG_COLOR,
+  PROGRESS_TAG_COLORS,
   getLevelProgress,
   type ProgressLog,
   type ProgressResult,
+  type ProgressTag,
   type QuestTodoItem,
   type QuestStatus,
   type QuestTask,
@@ -172,6 +176,7 @@ export default function QuestFlowPage() {
   const streak = useQuestStore((state) => state.streak);
   const classStates = useQuestStore((state) => state.classStates);
   const featState = useQuestStore((state) => state.featState);
+  const progressTags = useQuestStore((state) => state.progressTags);
   const addTask = useQuestStore((state) => state.addTask);
   const setFocusTask = useQuestStore((state) => state.setFocusTask);
   const updateTaskStatus = useQuestStore((state) => state.updateTaskStatus);
@@ -186,6 +191,7 @@ export default function QuestFlowPage() {
   const [selectedClass, setSelectedClass] = useState<ClassName>("Wizard");
   const [statusFilter, setStatusFilter] = useState<QuestStatus>("active");
   const [progressNote, setProgressNote] = useState("");
+  const [selectedProgressTagIds, setSelectedProgressTagIds] = useState<string[]>([]);
   const [lastProgress, setLastProgress] = useState<ProgressResult | null>(null);
   const [pulseTaskId, setPulseTaskId] = useState<string | null>(null);
   const [focusFlash, setFocusFlash] = useState(false);
@@ -401,13 +407,18 @@ export default function QuestFlowPage() {
   }, [enqueueProgress, enqueueSkillCheck]);
 
   const pushProgress = useCallback((taskId: string, note?: string) => {
-    handleProgressResult(progressTask(taskId, note));
+    handleProgressResult(progressTask(taskId, { note }));
   }, [handleProgressResult, progressTask]);
+
+  const toggleProgressTag = (tagId: string) => {
+    setSelectedProgressTagIds((ids) => ids.includes(tagId) ? ids.filter((id) => id !== tagId) : [...ids, tagId]);
+  };
 
   const pushFocusProgress = () => {
     if (!focusTask) return;
-    pushProgress(focusTask.id, progressNote);
+    handleProgressResult(progressTask(focusTask.id, { note: progressNote, progressTagIds: selectedProgressTagIds }));
     setProgressNote("");
+    setSelectedProgressTagIds([]);
   };
 
   const createFocusTodo = () => {
@@ -666,6 +677,13 @@ export default function QuestFlowPage() {
           <Trophy size={16} />
           Build
         </Link>
+        <Link
+          href="/tags"
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 active:scale-[0.97]"
+        >
+          <Tags size={16} />
+          Tags
+        </Link>
         {restState ? (
           <div className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
             {restState.type === "short" ? <Coffee size={16} /> : <Tent size={16} />}
@@ -828,6 +846,9 @@ export default function QuestFlowPage() {
             task={focusTask}
             note={progressNote}
             setNote={setProgressNote}
+            progressTags={progressTags}
+            selectedProgressTagIds={selectedProgressTagIds}
+            onToggleProgressTag={toggleProgressTag}
             onProgress={pushFocusProgress}
             lastProgress={lastProgress}
             isPulsing={pulseTaskId === focusTask?.id}
@@ -982,9 +1003,16 @@ function Metric({ label, value, children }: { label: string; value: string; chil
   );
 }
 
-function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }: {
-  task?: QuestTask; note: string; setNote: (v: string) => void; onProgress: () => void;
-  lastProgress: ProgressResult | null; isPulsing: boolean;
+function FocusPanel({ task, note, setNote, progressTags, selectedProgressTagIds, onToggleProgressTag, onProgress, lastProgress, isPulsing }: {
+  task?: QuestTask;
+  note: string;
+  setNote: (v: string) => void;
+  progressTags: ProgressTag[];
+  selectedProgressTagIds: string[];
+  onToggleProgressTag: (tagId: string) => void;
+  onProgress: () => void;
+  lastProgress: ProgressResult | null;
+  isPulsing: boolean;
 }) {
   const taskClass = task ? getTaskClass(task) : "Wizard";
 
@@ -1032,7 +1060,37 @@ function FocusPanel({ task, note, setNote, onProgress, lastProgress, isPulsing }
                 <span className="text-sm font-medium text-slate-500">steps</span>
               </div>
             </div>
-            <div className="mt-5 grid gap-2 sm:grid-cols-[1fr_auto]">
+            {progressTags.length > 0 ? (
+              <div className="mt-5 flex flex-wrap items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Progress Tags</span>
+                {progressTags.map((tag) => {
+                  const color = PROGRESS_TAG_COLORS[tag.colorId] ?? PROGRESS_TAG_COLORS[DEFAULT_PROGRESS_TAG_COLOR];
+                  const active = selectedProgressTagIds.includes(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => onToggleProgressTag(tag.id)}
+                      className={`rounded-full border px-3 py-1.5 font-black transition hover:-translate-y-0.5 active:scale-[0.96] ${
+                        active ? "text-xs shadow-sm" : "text-[9px] opacity-45 grayscale"
+                      }`}
+                      style={{
+                        color: active ? color.textColor : "#64748b",
+                        backgroundColor: active ? color.bgColor : "#f1f5f9",
+                        borderColor: active ? color.borderColor : "#cbd5e1"
+                      }}
+                    >
+                      #{tag.name}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                可在 <Link href="/tags" className="font-black text-emerald-700 hover:underline">Tags 页面</Link> 创建常用 Progress 标签。
+              </div>
+            )}
+            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -1438,6 +1496,22 @@ function ProgressLogPanel({ logs, task }: { logs: ProgressLog[]; task?: QuestTas
               {log.todoTitle ? (
                 <div className="mt-1 text-xs font-semibold text-emerald-700">
                   ✅ Todo 完成：{log.todoTitle}
+                </div>
+              ) : null}
+              {log.progressTags && log.progressTags.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {log.progressTags.map((tag) => {
+                    const color = PROGRESS_TAG_COLORS[tag.colorId] ?? PROGRESS_TAG_COLORS[DEFAULT_PROGRESS_TAG_COLOR];
+                    return (
+                      <span
+                        key={`${log.id}-${tag.id}`}
+                        className="rounded-full border px-2 py-0.5 text-[11px] font-black"
+                        style={{ color: color.textColor, backgroundColor: color.bgColor, borderColor: color.borderColor }}
+                      >
+                        #{tag.name}
+                      </span>
+                    );
+                  })}
                 </div>
               ) : null}
               {log.skillCheck && (

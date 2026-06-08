@@ -28,6 +28,7 @@ app/
   sync/page.tsx            -- Cloud sync configuration page
   resonance/page.tsx       -- Class resonance temple matrix / collection page
   build/page.tsx           -- Feat and automatic Build overview page
+  tags/page.tsx            -- Reusable Progress tag management page
 lib/
   quest-store.ts           -- Zustand store: all state, gamification logic, migrations
   server/webdav-config.ts  -- Server-side WebDAV config resolution/local config file helpers
@@ -68,14 +69,15 @@ package.json               -- Scripts, npm package version, electron-builder con
 - Zustand `persist` middleware + `createJSONStorage(() => localStorage)`
 - WebDAV sync available via `/api/webdav` proxy and `/sync` config page
 - WebDAV config is resolved server-side in `lib/server/webdav-config.ts`; do not store credentials in Zustand/browser state.
-- **Persist version: 13** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12 → v13)
+- **Persist version: 14** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12 → v13 → v14)
 
-### Store Schema (v13)
+### Store Schema (v14)
 
 | Field | Type | Description |
 |-------|------|-------------|
 | tasks | QuestTask[] | All tasks: id, title, progressCount, status, className, tags, per-task todos, timestamps |
-| logs | ProgressLog[] | Progress/scroll history: type, className, note, XP, skillCheck, scroll changes, skill events, fatigue, resonance |
+| logs | ProgressLog[] | Progress/scroll history: type, className, note, progressTags, XP, skillCheck, scroll changes, skill events, fatigue, resonance |
+| progressTags | ProgressTag[] | User-configured reusable Progress tags with preset color IDs |
 | focusTaskId | string \| undefined | Currently focused task ID |
 | totalXp | number | Total XP across all classes |
 | streak | { count: number; lastProgressDate?: string } | Consecutive day streak |
@@ -138,7 +140,18 @@ type ProgressLog = {
   resonanceReward?: string;
   todoId?: string;
   todoTitle?: string;
+  progressTags?: ProgressTagSnapshot[];
 }
+
+type ProgressTag = {
+  id: string;
+  name: string;
+  colorId: "blue" | "emerald" | "violet" | "amber" | "rose" | "sky" | "slate";
+  createdAt: string;
+  updatedAt: string;
+}
+
+type ProgressTagSnapshot = Pick<ProgressTag, "id" | "name" | "colorId">
 
 type DiscoveredResonance = {
   key: string;
@@ -175,7 +188,7 @@ type FeatState = {
 
 ### Backup Contract
 
-- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `13`.
+- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `14`.
 - `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, resonance chain, and feat state.
 - `updatedAt` is derived from `dataUpdatedAt`, task `updatedAt`, and log `at` so WebDAV conflict checks can compare local vs remote freshness.
 - `importData()` normalizes tasks and class states before writing to Zustand; use it for local file import and WebDAV restore instead of manually assigning persisted data.
@@ -259,6 +272,8 @@ Tasks can have tags: `important` and/or `urgent` (or none).
 | both | +5 XP | Purple |
 
 `TAG_META` uses hex values with inline styles to avoid Tailwind dynamic class issues.
+
+Progress tags are user-configured labels for progress logs, managed on `/tags`. They use `PROGRESS_TAG_COLORS`, do not affect XP, and are copied to `ProgressLog.progressTags` as snapshots so historical logs survive tag edits/deletes.
 
 ## Fatigue System
 
@@ -355,7 +370,7 @@ page.tsx
   │   └── ProgressBurst      ← particle burst + XP float text
   ├── QuestCard[]            ← task cards (title color matches class hexColor)
   │   └── QuestProgressBadge ← compact map region badge
-  ├── ProgressLogPanel       ← right-side progress log (shows DC, roll, modifier)
+  ├── ProgressLogPanel       ← right-side progress log (shows DC, roll, modifier, Progress tags)
   ├── RestUI                 ← rest countdown + confirmation
   ├── LongRestSummaryModal   ← daily adventure summary
   ├── PartyStatus            ← top bar with per-class fatigue bars
@@ -363,9 +378,9 @@ page.tsx
       └── ScrollReveal       ← scroll opening animation
 ```
 
-## Data Migration (v1→v13)
+## Data Migration (v1→v14)
 
-Zustand persist `version: 13`, `migrate` function handles:
+Zustand persist `version: 14`, `migrate` function handles:
 
 - **v1→v3**: Add totalXp, classStates, lastProgressDate; remove xp/crystals/companions/gachaHistory
 - **v3→v4**: Recalculate all skill tiers using 2^(n-1) formula
@@ -378,6 +393,7 @@ Zustand persist `version: 13`, `migrate` function handles:
 - **v10→v11**: Add `ProgressLog.type` and `ProgressLog.className`; scroll use now writes skill event logs
 - **v11→v12**: Add per-task `QuestTodoItem[]`; completed todos store `todoId`/`todoTitle` on progress logs
 - **v12→v13**: Add `FeatState`, pending feat choices, permanent owned feats, daily feat usage, and rest counters
+- **v13→v14**: Add reusable `ProgressTag[]` and `ProgressLog.progressTags` snapshots
 
 ## Key Conventions
 
