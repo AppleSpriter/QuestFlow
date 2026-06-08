@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { QUESTFLOW_COMPATIBILITY_VERSION, type QuestBackup, useQuestStore } from "@/lib/quest-store";
+import { QUESTFLOW_COMPATIBILITY_VERSION, type ProgressLog, type QuestBackup, type QuestTask, useQuestStore } from "@/lib/quest-store";
 import { ALL_CLASSES, CLASS_META, type ClassName } from "@/data/classes";
 
 type PublicWebDavConfig = {
@@ -61,6 +61,8 @@ type RemoteConflict = {
   localUpdatedAt: string;
 };
 
+type ProcessExportTask = QuestTask & { logCount: number; lastLogAt?: string };
+
 const defaultBackupFilePath = `questflow/questflow-backup-v${QUESTFLOW_COMPATIBILITY_VERSION}.json`;
 const legacyBackupFilePath = "questflow/questflow-backup.json";
 
@@ -96,8 +98,8 @@ const parseBackup = (raw: string) => {
   return parsed as QuestBackup;
 };
 
-const downloadTextFile = (text: string, fileName: string) => {
-  const blob = new Blob([text], { type: "application/json" });
+const downloadTextFile = (text: string, fileName: string, type = "application/json") => {
+  const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -106,6 +108,55 @@ const downloadTextFile = (text: string, fileName: string) => {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+};
+
+const sanitizeFileName = (name: string) =>
+  name
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .slice(0, 48) || "quest";
+
+const cleanCell = (value: string | number | undefined) =>
+  String(value ?? "")
+    .replace(/\t/g, " ")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+
+const formatProcessLogRows = (task: QuestTask, taskLogs: ProgressLog[]) => {
+  const header = ["推进时间", "事件", "职业", "Progress", "XP", "职业XP", "卷轴", "技能检定", "疲劳", "共鸣", "备注"].join("\t");
+  const rows = taskLogs
+    .slice()
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+    .map((log) => {
+      const event = log.type === "scroll"
+        ? log.skillUpgrade
+          ? `卷轴升级：${log.skillUpgrade.name} T${log.skillUpgrade.fromTier}→T${log.skillUpgrade.toTier}`
+          : `卷轴学习：${log.newSkill ?? log.scrollEarned ?? "技能"}`
+        : log.todoTitle
+          ? `完成 Todo：${log.todoTitle}`
+          : "Progress +1";
+      const skillCheck = log.skillCheck
+        ? `${log.skillCheck.success ? "成功" : "失败"} d20=${log.skillCheck.roll}+${log.skillCheck.modifier}/DC${log.skillCheck.dc}${log.skillCheck.critical ? " 大成功" : ""}`
+        : "";
+      const scroll = log.scrollCount ? `+${log.scrollCount}${log.scrollEarned ? ` ${log.scrollEarned}` : ""}` : log.newSkill ?? "";
+      const fatigue = log.fatigueBefore !== undefined && log.fatigueAfter !== undefined ? `${log.fatigueBefore}→${log.fatigueAfter}` : "";
+      return [
+        formatDateTime(log.at),
+        event,
+        log.className,
+        log.progressCount,
+        log.xpAwarded,
+        log.classXpAwarded,
+        scroll,
+        skillCheck,
+        fatigue,
+        log.resonanceName ? `${log.resonanceName}${log.resonanceReward ? `（${log.resonanceReward}）` : ""}` : "",
+        log.note
+      ].map(cleanCell).join("\t");
+    });
+
+  return [`Quest\t${cleanCell(task.title)}`, header, ...rows].join("\n");
 };
 
 async function postWebDav<T>(body: unknown): Promise<T> {
@@ -153,6 +204,7 @@ export default function SyncPage() {
   const [clearConfirm, setClearConfirm] = useState(false);
   const [overwriteConfirm, setOverwriteConfirm] = useState<OverwriteConfirm | null>(null);
   const [remoteInfo, setRemoteInfo] = useState<RemoteInfo | null>(null);
+  const [processExportOpen, setProcessExportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -196,6 +248,18 @@ export default function SyncPage() {
 
   const localBackup = useMemo(() => (mounted ? getBackupData() : null), [mounted, getBackupData, tasks, logs, totalXp, dataUpdatedAt, lastSyncedAt]);
   const localUpdatedAt = localBackup?.updatedAt;
+  const processExportTasks = useMemo<ProcessExportTask[]>(() => {
+    const stats = new Map<string, { logCount: number; lastLogAt?: string }>();
+    logs.forEach((log) => {
+      const current = stats.get(log.taskId) ?? { logCount: 0 };
+      const lastLogAt = !current.lastLogAt || new Date(log.at).getTime() > new Date(current.lastLogAt).getTime() ? log.at : current.lastLogAt;
+      stats.set(log.taskId, { logCount: current.logCount + 1, lastLogAt });
+    });
+    return tasks
+      .map((task) => ({ ...task, logCount: stats.get(task.id)?.logCount ?? 0, lastLogAt: stats.get(task.id)?.lastLogAt }))
+      .filter((task) => task.logCount > 0)
+      .sort((a, b) => new Date(b.lastLogAt ?? b.updatedAt).getTime() - new Date(a.lastLogAt ?? a.updatedAt).getTime());
+  }, [tasks, logs]);
 
   const setField = (key: keyof PublicWebDavConfig, value: string) => {
     setConfig((current) => ({ ...current, [key]: value }));
@@ -496,6 +560,20 @@ export default function SyncPage() {
     event.target.value = "";
   };
 
+  const exportTaskProcessLog = (taskId: string) => {
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task) return;
+    const taskLogs = logs.filter((log) => log.taskId === taskId);
+    if (taskLogs.length === 0) {
+      showMessage({ type: "info", text: "这个任务还没有 Progress Log。" });
+      return;
+    }
+    const text = formatProcessLogRows(task, taskLogs);
+    downloadTextFile(text, `questflow-process-${sanitizeFileName(task.title)}.tsv`, "text/tab-separated-values;charset=utf-8");
+    setProcessExportOpen(false);
+    showMessage({ type: "success", text: "已导出该任务的 Process Log。" });
+  };
+
   const clearLocalData = () => {
     clearAll();
     setClearConfirm(false);
@@ -626,6 +704,55 @@ export default function SyncPage() {
         </div>
       ) : null}
 
+      {processExportOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4"
+          onClick={() => setProcessExportOpen(false)}
+        >
+          <div
+            className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">导出事件 Process Log</h3>
+                <p className="mt-1 text-sm text-slate-500">选择一个任务，导出制表符分隔的推进时间、事件、奖励和备注。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProcessExportOpen(false)}
+                className="focus-ring rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+              >
+                关闭
+              </button>
+            </div>
+            <div className="mt-4 max-h-96 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50">
+              {processExportTasks.length > 0 ? processExportTasks.map((task, i) => {
+                const meta = CLASS_META[task.className];
+                return (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => exportTaskProcessLog(task.id)}
+                    className={`focus-ring flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition hover:bg-white ${i > 0 ? "border-t border-slate-100" : ""}`}
+                  >
+                    <span className="min-w-0">
+                      <span style={{ color: meta.hexColor }} className="block truncate font-semibold">{meta.emoji} {task.title}</span>
+                      <span className="text-xs text-slate-400">最近推进 {formatDateTime(task.lastLogAt)} · {task.status}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-500">
+                      {task.logCount} logs
+                    </span>
+                  </button>
+                );
+              }) : (
+                <div className="px-3 py-8 text-center text-sm text-slate-500">暂无可导出的任务日志。</div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {conflict ? (
         <section className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-start gap-3">
@@ -702,6 +829,14 @@ export default function SyncPage() {
             >
               <Download size={16} />
               导出本地 JSON
+            </button>
+            <button
+              type="button"
+              onClick={() => setProcessExportOpen(true)}
+              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              <Download size={16} />
+              导出事件 Log
             </button>
             <button
               type="button"
