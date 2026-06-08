@@ -392,7 +392,7 @@ export const SHORT_REST_RECOVERY = 30; // -30% fatigue
 
 // ─── Task tags ────────────────────────────────────────────────
 
-export type TaskTag = "important" | "urgent";
+export type TaskTag = "important" | "urgent" | "daily" | "weekly";
 
 export function getTagBonus(tags: TaskTag[]): number {
   const hasImportant = tags.includes("important");
@@ -405,7 +405,9 @@ export function getTagBonus(tags: TaskTag[]): number {
 
 export const TAG_META: Record<TaskTag, { label: string; textColor: string; bgColor: string; borderColor: string }> = {
   important: { label: "重要", textColor: "#1d4ed8", bgColor: "#dbeafe", borderColor: "#93c5fd" },
-  urgent:    { label: "紧急", textColor: "#b91c1c", bgColor: "#fee2e2", borderColor: "#fca5a5" }
+  urgent:    { label: "紧急", textColor: "#b91c1c", bgColor: "#fee2e2", borderColor: "#fca5a5" },
+  daily:     { label: "每日", textColor: "#047857", bgColor: "#d1fae5", borderColor: "#6ee7b7" },
+  weekly:    { label: "每周", textColor: "#7c2d12", bgColor: "#ffedd5", borderColor: "#fdba74" }
 };
 
 // ─── Helper functions ──────────────────────────────────────────────

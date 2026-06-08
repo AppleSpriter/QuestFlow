@@ -54,7 +54,7 @@ package.json               -- Scripts, npm package version, electron-builder con
 ## Versioning and Packaging
 
 - The packaged app version in `package.json` must track the latest current development entry in `CHANGELOG.md`.
-- Example: when the newest changelog milestone is `v1.8`, package builds should use `version: "1.8.0"`.
+- Example: when the newest changelog milestone is `v1.9`, package builds should use `version: "1.9.0"`.
 - Keep README/AGENTS/changelog/package version notes aligned when a release milestone changes.
 - Desktop scripts:
   - `npm run desktop:dev`: run Next on port 3100 and launch Electron against it.
@@ -69,13 +69,13 @@ package.json               -- Scripts, npm package version, electron-builder con
 - Zustand `persist` middleware + `createJSONStorage(() => localStorage)`
 - WebDAV sync available via `/api/webdav` proxy and `/sync` config page
 - WebDAV config is resolved server-side in `lib/server/webdav-config.ts`; do not store credentials in Zustand/browser state.
-- **Persist version: 14** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12 → v13 → v14)
+- **Persist version: 15** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12 → v13 → v14 → v15)
 
-### Store Schema (v14)
+### Store Schema (v15)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| tasks | QuestTask[] | All tasks: id, title, progressCount, status, className, tags, per-task todos, timestamps |
+| tasks | QuestTask[] | All tasks: id, title, progressCount, status, className, tags, per-task todos, recurring completion keys, timestamps |
 | logs | ProgressLog[] | Progress/scroll history: type, className, note, progressTags, XP, skillCheck, scroll changes, skill events, fatigue, resonance |
 | progressTags | ProgressTag[] | User-configured reusable Progress tags with preset color IDs |
 | focusTaskId | string \| undefined | Currently focused task ID |
@@ -110,8 +110,10 @@ type QuestTask = {
   progressCount: number;
   status: QuestStatus;     // "active" | "paused" | "archived"
   className: ClassName;
-  tags: TaskTag[];          // "important" | "urgent"
+  tags: TaskTag[];          // "important" | "urgent" | "daily" | "weekly"
   todos: QuestTodoItem[];   // task-level checklist; completing one triggers progress
+  recurringCompletedAt?: string;
+  recurringCompletedKey?: string; // local day key for daily, Monday week-start key for weekly
   createdAt: string;
   updatedAt: string;
   lastFocusedAt?: string;
@@ -146,7 +148,7 @@ type ProgressLog = {
 type ProgressTag = {
   id: string;
   name: string;
-  colorId: "blue" | "emerald" | "violet" | "amber" | "rose" | "sky" | "slate";
+  colorId: "blue" | "emerald" | "violet" | "amber" | "rose" | "sky" | "slate" | "fuchsia" | "cyan" | "lime" | "orange" | "indigo" | "pink";
   createdAt: string;
   updatedAt: string;
 }
@@ -188,7 +190,7 @@ type FeatState = {
 
 ### Backup Contract
 
-- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `14`.
+- `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `15`.
 - `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, resonance chain, and feat state.
 - `updatedAt` is derived from `dataUpdatedAt`, task `updatedAt`, and log `at` so WebDAV conflict checks can compare local vs remote freshness.
 - `importData()` normalizes tasks and class states before writing to Zustand; use it for local file import and WebDAV restore instead of manually assigning persisted data.
@@ -263,15 +265,17 @@ Each `progressTask` call has a 50% chance to trigger a skill check:
 
 ## Task Tag System
 
-Tasks can have tags: `important` and/or `urgent` (or none).
+Tasks can have tags: `important`, `urgent`, `daily`, `weekly` (or none). Existing task cards can edit these tags inline.
 
-| Tag | Bonus XP | UI Color |
-|-----|----------|----------|
-| important | +3 XP | Blue (#1d4ed8) |
-| urgent | +2 XP | Red (#b91c1c) |
-| both | +5 XP | Purple |
+| Tag | Bonus XP | UI Color | Behavior |
+|-----|----------|----------|----------|
+| important | +3 XP | Blue (#1d4ed8) | Reward priority |
+| urgent | +2 XP | Red (#b91c1c) | Reward priority |
+| important + urgent | +5 XP | Purple | Combined reward priority |
+| daily | none | Green (#047857) | `completeRecurringTask()` archives until the next local day |
+| weekly | none | Orange (#7c2d12) | `completeRecurringTask()` archives until the next local Monday week key |
 
-`TAG_META` uses hex values with inline styles to avoid Tailwind dynamic class issues.
+`TAG_META` uses hex values with inline styles to avoid Tailwind dynamic class issues. `refreshRecurringTasks()` reactivates archived daily/weekly tasks whose completion key is no longer current.
 
 Progress tags are user-configured labels for progress logs, managed on `/tags`. They use `PROGRESS_TAG_COLORS`, do not affect XP, and are copied to `ProgressLog.progressTags` as snapshots so historical logs survive tag edits/deletes.
 
@@ -378,9 +382,9 @@ page.tsx
       └── ScrollReveal       ← scroll opening animation
 ```
 
-## Data Migration (v1→v14)
+## Data Migration (v1→v15)
 
-Zustand persist `version: 14`, `migrate` function handles:
+Zustand persist `version: 15`, `migrate` function handles:
 
 - **v1→v3**: Add totalXp, classStates, lastProgressDate; remove xp/crystals/companions/gachaHistory
 - **v3→v4**: Recalculate all skill tiers using 2^(n-1) formula
@@ -394,6 +398,7 @@ Zustand persist `version: 14`, `migrate` function handles:
 - **v11→v12**: Add per-task `QuestTodoItem[]`; completed todos store `todoId`/`todoTitle` on progress logs
 - **v12→v13**: Add `FeatState`, pending feat choices, permanent owned feats, daily feat usage, and rest counters
 - **v13→v14**: Add reusable `ProgressTag[]` and `ProgressLog.progressTags` snapshots
+- **v14→v15**: Add `daily`/`weekly` task tags plus `recurringCompletedAt` and `recurringCompletedKey`
 
 ## Key Conventions
 

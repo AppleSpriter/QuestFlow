@@ -1,6 +1,6 @@
 {
   "name": "questflow-v1",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "QuestFlow desktop progress tracker",
   "author": "QuestFlow",
   "private": true,
@@ -82,8 +82,7 @@
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
     },
     "win": {

@@ -61,6 +61,7 @@ const localStorageProvider = () => {
 
 export type QuestStatus = "active" | "paused" | "archived";
 export type ProgressLogType = "progress" | "scroll";
+export type RecurringTaskFrequency = "daily" | "weekly";
 export type ProgressTagColorId = "blue" | "emerald" | "violet" | "amber" | "rose" | "sky" | "slate" | "fuchsia" | "cyan" | "lime" | "orange" | "indigo" | "pink";
 
 export type ProgressTagColorMeta = {
@@ -118,6 +119,8 @@ export type QuestTask = {
   className: ClassName;
   tags: TaskTag[];
   todos: QuestTodoItem[];
+  recurringCompletedAt?: string;
+  recurringCompletedKey?: string;
   createdAt: string;
   updatedAt: string;
   lastFocusedAt?: string;
@@ -248,6 +251,9 @@ type QuestStore = {
   addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
+  updateTaskTags: (taskId: string, tags: TaskTag[]) => void;
+  completeRecurringTask: (taskId: string) => ProgressResult | null;
+  refreshRecurringTasks: () => void;
   addTaskTodo: (taskId: string, title: string) => string | null;
   reorderTaskTodo: (taskId: string, todoId: string, targetTodoId: string) => void;
   toggleTaskTodo: (taskId: string, todoId: string) => ProgressResult | null;
@@ -269,8 +275,8 @@ type QuestStore = {
 };
 
 const classNames: ClassName[] = ALL_CLASSES;
-export const QUESTFLOW_BACKUP_VERSION = 14;
-export const QUESTFLOW_COMPATIBILITY_VERSION = 14;
+export const QUESTFLOW_BACKUP_VERSION = 15;
+export const QUESTFLOW_COMPATIBILITY_VERSION = 15;
 
 const getSkillLineIds = () => new Set(SKILL_LINES.map((line) => line.id));
 
@@ -325,6 +331,24 @@ const normalizeClassStates = (classStates: unknown): Record<ClassName, ClassStat
 
 const isClassName = (value: unknown): value is ClassName =>
   typeof value === "string" && classNames.includes(value as ClassName);
+
+const isTaskTag = (value: unknown): value is TaskTag =>
+  value === "important" || value === "urgent" || value === "daily" || value === "weekly";
+
+const getRecurringFrequency = (tags: TaskTag[]): RecurringTaskFrequency | undefined => {
+  if (tags.includes("daily")) return "daily";
+  if (tags.includes("weekly")) return "weekly";
+  return undefined;
+};
+
+const getRecurringKey = (date: Date, frequency: RecurringTaskFrequency) => {
+  if (frequency === "daily") return getLocalDayKey(date);
+  const normalized = new Date(date);
+  normalized.setHours(0, 0, 0, 0);
+  const day = normalized.getDay() || 7;
+  normalized.setDate(normalized.getDate() - day + 1);
+  return getLocalDayKey(normalized);
+};
 
 const isProgressTagColorId = (value: unknown): value is ProgressTagColorId =>
   typeof value === "string" && value in PROGRESS_TAG_COLORS;
@@ -459,14 +483,18 @@ const normalizeTasks = (tasks: unknown): QuestTask[] => {
           ? item.lastFocusedAt
           : createdAt;
 
+    const tags = Array.isArray(item.tags) ? item.tags.filter(isTaskTag) : [];
+
     return {
       id: typeof item.id === "string" ? item.id : makeId(),
       title: typeof item.title === "string" ? item.title : "Untitled Quest",
       progressCount: typeof item.progressCount === "number" ? item.progressCount : 0,
       status: item.status === "paused" || item.status === "archived" ? item.status : "active",
       className: isClassName(item.className) ? item.className : "Wizard",
-      tags: Array.isArray(item.tags) ? item.tags.filter((t: string) => t === "important" || t === "urgent") as TaskTag[] : [],
+      tags,
       todos: normalizeTodos(item.todos),
+      recurringCompletedAt: typeof item.recurringCompletedAt === "string" ? item.recurringCompletedAt : undefined,
+      recurringCompletedKey: typeof item.recurringCompletedKey === "string" ? item.recurringCompletedKey : undefined,
       createdAt,
       updatedAt,
       lastFocusedAt: typeof item.lastFocusedAt === "string" ? item.lastFocusedAt : undefined
@@ -650,6 +678,7 @@ export const useQuestStore = create<QuestStore>()(
       addTask: (rawTitle, className: ClassName = "Wizard", tags: TaskTag[] = []) => {
         const title = rawTitle.trim();
         if (!title) return null;
+        const normalizedTags = tags.filter(isTaskTag).filter((tag, index, items) => items.indexOf(tag) === index);
         const now = new Date().toISOString();
         const task: QuestTask = {
           id: makeId(),
@@ -657,7 +686,7 @@ export const useQuestStore = create<QuestStore>()(
           progressCount: 0,
           status: "active",
           className,
-          tags,
+          tags: normalizedTags,
           todos: [],
           createdAt: now,
           updatedAt: now,
@@ -694,6 +723,82 @@ export const useQuestStore = create<QuestStore>()(
               ? nextTasks.find((task) => task.status === "active")?.id
               : state.focusTaskId;
           return { tasks: nextTasks, focusTaskId: nextFocus, dataUpdatedAt: now };
+        });
+      },
+
+      updateTaskTags: (taskId, tags) => {
+        const now = new Date().toISOString();
+        const normalizedTags = tags.filter(isTaskTag).filter((tag, index, items) => items.indexOf(tag) === index);
+        let changed = false;
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.id !== taskId) return task;
+            changed = true;
+            const frequency = getRecurringFrequency(normalizedTags);
+            const keepRecurringCompletion = frequency && getRecurringFrequency(task.tags) === frequency;
+            return {
+              ...task,
+              tags: normalizedTags,
+              recurringCompletedAt: keepRecurringCompletion ? task.recurringCompletedAt : undefined,
+              recurringCompletedKey: keepRecurringCompletion ? task.recurringCompletedKey : undefined,
+              updatedAt: now
+            };
+          }),
+          dataUpdatedAt: changed ? now : state.dataUpdatedAt
+        }));
+      },
+
+      completeRecurringTask: (taskId) => {
+        const state = get();
+        const task = state.tasks.find((item) => item.id === taskId);
+        if (!task || task.status === "archived") return null;
+        const frequency = getRecurringFrequency(task.tags);
+        if (!frequency) return null;
+
+        const result = get().progressTask(taskId, frequency === "daily" ? "完成今日" : "完成本周");
+        if (!result) return null;
+
+        const completedAt = result.at;
+        const completedKey = getRecurringKey(new Date(completedAt), frequency);
+        const nextState = get();
+        const nextTasks = nextState.tasks.map((item) =>
+          item.id === taskId
+            ? {
+                ...item,
+                status: "archived" as QuestStatus,
+                recurringCompletedAt: completedAt,
+                recurringCompletedKey: completedKey,
+                updatedAt: completedAt
+              }
+            : item
+        );
+        const nextFocus = nextState.focusTaskId === taskId
+          ? nextTasks.find((item) => item.status === "active")?.id
+          : nextState.focusTaskId;
+        set({ tasks: nextTasks, focusTaskId: nextFocus, dataUpdatedAt: completedAt });
+        return result;
+      },
+
+      refreshRecurringTasks: () => {
+        const nowDate = new Date();
+        const now = nowDate.toISOString();
+        let changed = false;
+        set((state) => {
+          const nextTasks = state.tasks.map((task) => {
+            const frequency = getRecurringFrequency(task.tags);
+            if (!frequency || task.status !== "archived") return task;
+            const currentKey = getRecurringKey(nowDate, frequency);
+            if (task.recurringCompletedKey === currentKey) return task;
+            changed = true;
+            return {
+              ...task,
+              status: "active" as QuestStatus,
+              recurringCompletedAt: undefined,
+              recurringCompletedKey: undefined,
+              updatedAt: now
+            };
+          });
+          return changed ? { tasks: nextTasks, dataUpdatedAt: now } : state;
         });
       },
 
@@ -1452,6 +1557,16 @@ export const useQuestStore = create<QuestStore>()(
             tasks,
             logs: normalizeLogs(data.logs, tasks),
             progressTags: normalizeProgressTags(data.progressTags)
+          };
+        }
+
+        // v14→v15: add daily/weekly recurring task tags and completion keys.
+        if (version < 15) {
+          const tasks = normalizeTasks(data.tasks);
+          data = {
+            ...data,
+            tasks,
+            logs: normalizeLogs(data.logs, tasks)
           };
         }
 

@@ -110,6 +110,11 @@ const formatLogTime = (iso: string) =>
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
   }).format(new Date(iso));
 
+const formatDateTime = (iso: string) =>
+  new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+  }).format(new Date(iso));
+
 const regionBackgrounds: Record<string, string> = {
   camp: "linear-gradient(180deg, #faf9f7 0%, #f0ece6 50%, #e8e2d8 100%)",
   trail: "linear-gradient(180deg, #fff7ed 0%, #fed7aa 50%, #fdba74 100%)",
@@ -184,6 +189,9 @@ export default function QuestFlowPage() {
   const reorderTaskTodo = useQuestStore((state) => state.reorderTaskTodo);
   const toggleTaskTodo = useQuestStore((state) => state.toggleTaskTodo);
   const progressTask = useQuestStore((state) => state.progressTask);
+  const updateTaskTags = useQuestStore((state) => state.updateTaskTags);
+  const completeRecurringTask = useQuestStore((state) => state.completeRecurringTask);
+  const refreshRecurringTasks = useQuestStore((state) => state.refreshRecurringTasks);
   const chooseFeat = useQuestStore((state) => state.chooseFeat);
 
   const [mounted, setMounted] = useState(false);
@@ -258,7 +266,10 @@ export default function QuestFlowPage() {
     setShowRestCompleteConfirm(true);
   };
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    refreshRecurringTasks();
+  }, [refreshRecurringTasks]);
 
   useEffect(() => () => {
     if (normalResonanceTimerRef.current) clearTimeout(normalResonanceTimerRef.current);
@@ -417,6 +428,13 @@ export default function QuestFlowPage() {
   const pushFocusProgress = () => {
     if (!focusTask) return;
     handleProgressResult(progressTask(focusTask.id, { note: progressNote, progressTagIds: selectedProgressTagIds }));
+    setProgressNote("");
+    setSelectedProgressTagIds([]);
+  };
+
+  const completeFocusRecurring = () => {
+    if (!focusTask) return;
+    handleProgressResult(completeRecurringTask(focusTask.id));
     setProgressNote("");
     setSelectedProgressTagIds([]);
   };
@@ -800,10 +818,10 @@ export default function QuestFlowPage() {
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-medium text-slate-500">标签</span>
-                  {(["important", "urgent"] as TaskTag[]).map((tag) => {
+                  {(["important", "urgent", "daily", "weekly"] as TaskTag[]).map((tag) => {
                     const meta = TAG_META[tag];
                     const active = selectedTags.includes(tag);
-                    const bonus = tag === "important" ? 3 : 2;
+                    const bonus = tag === "important" ? 3 : tag === "urgent" ? 2 : 0;
                     return (
                       <button
                         key={tag}
@@ -816,7 +834,7 @@ export default function QuestFlowPage() {
                           borderColor: meta.borderColor
                         } : undefined}
                       >
-                        {meta.label} {active ? `+${bonus} XP` : ""}
+                        {meta.label} {active && bonus > 0 ? `+${bonus} XP` : ""}
                       </button>
                     );
                   })}
@@ -850,6 +868,7 @@ export default function QuestFlowPage() {
             selectedProgressTagIds={selectedProgressTagIds}
             onToggleProgressTag={toggleProgressTag}
             onProgress={pushFocusProgress}
+            onCompleteRecurring={completeFocusRecurring}
             lastProgress={lastProgress}
             isPulsing={pulseTaskId === focusTask?.id}
           />
@@ -917,6 +936,7 @@ export default function QuestFlowPage() {
                     onFocus={() => changeFocus(task.id)}
                     onProgress={() => pushProgress(task.id)}
                     onStatus={(s) => updateTaskStatus(task.id, s)}
+                    onTagsChange={(tags) => updateTaskTags(task.id, tags)}
                   />
                 ))}
               </div>
@@ -1003,7 +1023,7 @@ function Metric({ label, value, children }: { label: string; value: string; chil
   );
 }
 
-function FocusPanel({ task, note, setNote, progressTags, selectedProgressTagIds, onToggleProgressTag, onProgress, lastProgress, isPulsing }: {
+function FocusPanel({ task, note, setNote, progressTags, selectedProgressTagIds, onToggleProgressTag, onProgress, onCompleteRecurring, lastProgress, isPulsing }: {
   task?: QuestTask;
   note: string;
   setNote: (v: string) => void;
@@ -1011,10 +1031,12 @@ function FocusPanel({ task, note, setNote, progressTags, selectedProgressTagIds,
   selectedProgressTagIds: string[];
   onToggleProgressTag: (tagId: string) => void;
   onProgress: () => void;
+  onCompleteRecurring: () => void;
   lastProgress: ProgressResult | null;
   isPulsing: boolean;
 }) {
   const taskClass = task ? getTaskClass(task) : "Wizard";
+  const recurringFrequency = task?.tags.includes("daily") ? "daily" : task?.tags.includes("weekly") ? "weekly" : undefined;
 
   return (
     <motion.section
@@ -1045,7 +1067,21 @@ function FocusPanel({ task, note, setNote, progressTags, selectedProgressTagIds,
           <motion.div key={task.id} initial={{ opacity: 0, x: 42 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -42 }} transition={{ duration: 0.26 }}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div className="min-w-0">
-                <h2 className="break-words text-3xl font-semibold sm:text-4xl" style={{ color: CLASS_META[taskClass].hexColor }}>{task.title}</h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="break-words text-3xl font-semibold sm:text-4xl" style={{ color: CLASS_META[taskClass].hexColor }}>{task.title}</h2>
+                  {(task.tags ?? []).map((tag) => {
+                    const meta = TAG_META[tag];
+                    return (
+                      <span
+                        key={`focus-${task.id}-${tag}`}
+                        className="rounded-full border px-2 py-0.5 text-[10px] font-black"
+                        style={{ color: meta.textColor, backgroundColor: meta.bgColor, borderColor: meta.borderColor }}
+                      >
+                        {meta.label}
+                      </span>
+                    );
+                  })}
+                </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-sm text-slate-500">
                   <span>Progress {task.progressCount}</span>
                   <span>最近更新 {relativeTime(task.updatedAt)}</span>
@@ -1099,14 +1135,26 @@ function FocusPanel({ task, note, setNote, progressTags, selectedProgressTagIds,
                 rows={2}
                 className="focus-ring min-h-12 w-full resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-950 placeholder:text-slate-400"
               />
-              <button
-                type="button"
-                onClick={onProgress}
-                className="focus-ring inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 active:scale-[0.97] active:shadow-none"
-              >
-                <Zap size={18} />
-                +1 推进一步
-              </button>
+              <div className="grid gap-2 sm:min-w-44">
+                <button
+                  type="button"
+                  onClick={onProgress}
+                  className="focus-ring inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-600 active:scale-[0.97] active:shadow-none"
+                >
+                  <Zap size={18} />
+                  +1 推进一步
+                </button>
+                {recurringFrequency ? (
+                  <button
+                    type="button"
+                    onClick={onCompleteRecurring}
+                    className="focus-ring inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 active:scale-[0.97] active:shadow-none"
+                  >
+                    <CheckCircle2 size={18} />
+                    {recurringFrequency === "daily" ? "完成今日" : "完成本周"}
+                  </button>
+                ) : null}
+              </div>
             </div>
           </motion.div>
         ) : (
@@ -1214,10 +1262,17 @@ type QuestCardProps = {
   onFocus: () => void;
   onProgress: () => void;
   onStatus: (status: QuestStatus) => void;
+  onTagsChange: (tags: TaskTag[]) => void;
 };
 
-function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: QuestCardProps) {
+function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus, onTagsChange }: QuestCardProps) {
   const taskClass = getTaskClass(task);
+  const toggleTaskTag = (tag: TaskTag) => {
+    const nextTags = task.tags.includes(tag)
+      ? task.tags.filter((item) => item !== tag)
+      : [...task.tags, tag];
+    onTagsChange(nextTags);
+  };
 
   return (
     <motion.article
@@ -1255,15 +1310,42 @@ function QuestCard({ task, isFocus, isPulsing, onFocus, onProgress, onStatus }: 
             })}
           </div>
           <div className="mt-3"><QuestProgressBadge progressCount={task.progressCount} /></div>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Edit Tags</span>
+            {(["important", "urgent", "daily", "weekly"] as TaskTag[]).map((tag) => {
+              const meta = TAG_META[tag];
+              const active = task.tags.includes(tag);
+              return (
+                <button
+                  key={`${task.id}-${tag}`}
+                  type="button"
+                  onClick={() => toggleTaskTag(tag)}
+                  className="rounded-full border px-2 py-1 text-[11px] font-black transition hover:-translate-y-0.5 active:scale-[0.96]"
+                  style={{
+                    color: active ? meta.textColor : "#64748b",
+                    backgroundColor: active ? meta.bgColor : "#f8fafc",
+                    borderColor: active ? meta.borderColor : "#e2e8f0"
+                  }}
+                >
+                  {active ? "✓ " : "+ "}{meta.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <motion.div key={task.progressCount} initial={{ scale: 0.88, opacity: 0.45 }} animate={{ scale: 1, opacity: 1 }} className="shrink-0 text-right">
           <div className="text-3xl font-semibold text-slate-950">{task.progressCount}</div>
           <div className="text-xs font-medium text-slate-500">Progress</div>
         </motion.div>
       </div>
-      <div className="mt-4 flex items-center justify-between gap-3 text-sm text-slate-500">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
         <span>最近更新 {relativeTime(task.updatedAt)}</span>
         {task.lastFocusedAt && <span>专注 {relativeTime(task.lastFocusedAt)}</span>}
+        {task.status === "archived" && task.recurringCompletedAt ? (
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-600">
+            上次完成 {formatDateTime(task.recurringCompletedAt)}
+          </span>
+        ) : null}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {task.status !== "archived" ? (
