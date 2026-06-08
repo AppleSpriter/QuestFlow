@@ -15,6 +15,7 @@ import {
   Coffee,
   EyeOff,
   Flame,
+  GripVertical,
   Pause,
   Play,
   Plus,
@@ -25,7 +26,7 @@ import {
   Trophy,
   Zap
 } from "lucide-react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import type { CSSProperties, DragEvent, FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getLevelProgress,
@@ -175,6 +176,7 @@ export default function QuestFlowPage() {
   const setFocusTask = useQuestStore((state) => state.setFocusTask);
   const updateTaskStatus = useQuestStore((state) => state.updateTaskStatus);
   const addTaskTodo = useQuestStore((state) => state.addTaskTodo);
+  const reorderTaskTodo = useQuestStore((state) => state.reorderTaskTodo);
   const toggleTaskTodo = useQuestStore((state) => state.toggleTaskTodo);
   const progressTask = useQuestStore((state) => state.progressTask);
   const chooseFeat = useQuestStore((state) => state.chooseFeat);
@@ -422,6 +424,11 @@ export default function QuestFlowPage() {
   const completeFocusTodo = (todoId: string) => {
     if (!focusTask) return;
     handleProgressResult(toggleTaskTodo(focusTask.id, todoId));
+  };
+
+  const reorderFocusTodo = (todoId: string, targetTodoId: string) => {
+    if (!focusTask) return;
+    reorderTaskTodo(focusTask.id, todoId, targetTodoId);
   };
 
   const selectFeat = (choiceId: string, featId: string) => {
@@ -908,6 +915,7 @@ export default function QuestFlowPage() {
             onSubmit={submitFocusTodo}
             onCreate={createFocusTodo}
             onToggle={completeFocusTodo}
+            onReorder={reorderFocusTodo}
           />
           <ProgressLogPanel logs={focusLogs} task={focusTask} />
         </aside>
@@ -1271,6 +1279,7 @@ type FocusTodoPanelProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCreate: () => void;
   onToggle: (todoId: string) => void;
+  onReorder: (todoId: string, targetTodoId: string) => void;
 };
 
 function FocusTodoPanel({
@@ -1282,11 +1291,21 @@ function FocusTodoPanel({
   onSubmit,
   onCreate,
   onToggle,
+  onReorder,
 }: FocusTodoPanelProps) {
+  const [dragTodoId, setDragTodoId] = useState<string | null>(null);
   const todos = task?.todos ?? [];
   const openTodos = todos.filter((todo) => !todo.completedAt);
   const completedTodos = todos.filter((todo) => todo.completedAt);
   const visibleCompleted = showCompleted ? completedTodos : [];
+  const visibleTodos = [...openTodos, ...visibleCompleted];
+
+  const dropTodo = (event: DragEvent, targetTodoId: string) => {
+    event.preventDefault();
+    if (!dragTodoId || dragTodoId === targetTodoId) return;
+    onReorder(dragTodoId, targetTodoId);
+    setDragTodoId(null);
+  };
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
@@ -1328,29 +1347,43 @@ function FocusTodoPanel({
             </button>
           </form>
 
-          {openTodos.length + visibleCompleted.length > 0 ? (
+          {visibleTodos.length > 0 ? (
             <div className="space-y-2">
-              {[...openTodos, ...visibleCompleted].map((todo) => {
+              {visibleTodos.map((todo) => {
                 const completed = Boolean(todo.completedAt);
+                const dragging = dragTodoId === todo.id;
                 return (
-                  <motion.button
+                  <motion.div
                     key={todo.id}
-                    type="button"
                     layout
-                    onClick={() => onToggle(todo.id)}
+                    draggable
+                    onDragStart={() => setDragTodoId(todo.id)}
+                    onDragEnd={() => setDragTodoId(null)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => dropTodo(event, todo.id)}
                     className={`focus-ring flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${
                       completed
-                        ? "border-slate-200 bg-slate-50 text-slate-400 line-through"
+                        ? "border-slate-200 bg-slate-50 text-slate-400"
                         : "border-emerald-200 bg-emerald-50/70 text-slate-800 hover:bg-emerald-100"
-                    }`}
+                    } ${dragging ? "opacity-50 ring-2 ring-emerald-300" : ""}`}
                   >
-                    {completed ? (
-                      <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-slate-400" />
-                    ) : (
-                      <Circle size={17} className="mt-0.5 shrink-0 text-emerald-600" />
-                    )}
-                    <span className="min-w-0 flex-1 break-words">{todo.title}</span>
-                  </motion.button>
+                    <span className="mt-0.5 shrink-0 cursor-grab text-slate-400 active:cursor-grabbing" aria-label="拖动排序">
+                      <GripVertical size={16} />
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onToggle(todo.id)}
+                      className="mt-0.5 shrink-0 rounded-full text-left"
+                      aria-label={completed ? "恢复 Todo" : "完成 Todo"}
+                    >
+                      {completed ? (
+                        <CheckCircle2 size={17} className="text-slate-400" />
+                      ) : (
+                        <Circle size={17} className="text-emerald-600" />
+                      )}
+                    </button>
+                    <span className={`min-w-0 flex-1 break-words ${completed ? "line-through" : ""}`}>{todo.title}</span>
+                  </motion.div>
                 );
               })}
             </div>

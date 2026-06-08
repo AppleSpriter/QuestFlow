@@ -61,6 +61,11 @@ type RemoteConflict = {
   localUpdatedAt: string;
 };
 
+type ReplacementNotice = {
+  title: string;
+  description: string;
+};
+
 type ProcessExportTask = QuestTask & { logCount: number; lastLogAt?: string };
 
 const defaultBackupFilePath = `questflow/questflow-backup-v${QUESTFLOW_COMPATIBILITY_VERSION}.json`;
@@ -203,6 +208,7 @@ export default function SyncPage() {
   const [conflict, setConflict] = useState<RemoteConflict | null>(null);
   const [clearConfirm, setClearConfirm] = useState(false);
   const [overwriteConfirm, setOverwriteConfirm] = useState<OverwriteConfirm | null>(null);
+  const [replacementNotice, setReplacementNotice] = useState<ReplacementNotice | null>(null);
   const [remoteInfo, setRemoteInfo] = useState<RemoteInfo | null>(null);
   const [processExportOpen, setProcessExportOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -291,6 +297,10 @@ export default function SyncPage() {
     }
   };
 
+  const showReplacementNotice = (title: string, description: string) => {
+    setReplacementNotice({ title, description });
+  };
+
   const testConnection = async () => {
     setBusy("test");
     setMessage(null);
@@ -320,6 +330,7 @@ export default function SyncPage() {
       if (markAsSynced) markSynced(syncedAt);
       refreshRemoteInfo();
       showMessage({ type: "success", text: "本机存档已导出到 WebDAV。" });
+      showReplacementNotice("已完成本机覆盖云端", "本机存档已上传到 WebDAV，云端存档已被本机数据替换。");
       return true;
     } catch (error) {
       showMessage({ type: "error", text: error instanceof Error ? error.message : "WebDAV 导出失败。" });
@@ -379,6 +390,7 @@ export default function SyncPage() {
         type: ok ? "success" : "error",
         text: ok ? "已从 WebDAV 导入云端存档。" : "WebDAV 存档导入失败。"
       });
+      if (ok) showReplacementNotice("已完成云端覆盖本机", "WebDAV 云端存档已导入，本机存档已被云端数据替换。");
       return ok;
     } catch (error) {
       showMessage({ type: "error", text: error instanceof Error ? error.message : "WebDAV 导入失败。" });
@@ -427,6 +439,7 @@ export default function SyncPage() {
         markSynced(new Date().toISOString());
         refreshRemoteInfo();
         showMessage({ type: "success", text: "云端无存档，已上传本机存档作为初始云端版本。" });
+        showReplacementNotice("已完成本机上传云端", "云端原本没有存档，已使用本机存档创建云端版本。");
         return;
       }
 
@@ -443,6 +456,7 @@ export default function SyncPage() {
         importData(remoteText, { markSyncedAt: syncedAt });
         refreshRemoteInfo();
         showMessage({ type: "success", text: "本机无数据，已从云端下载存档。" });
+        showReplacementNotice("已完成云端覆盖本机", "本机原本没有存档，已使用 WebDAV 云端存档恢复本机数据。");
         return;
       }
 
@@ -470,6 +484,7 @@ export default function SyncPage() {
             importData(remoteText, { markSyncedAt: new Date().toISOString() });
             refreshRemoteInfo();
             showMessage({ type: "success", text: "云端较新，已下载并应用云端存档。" });
+            showReplacementNotice("已完成云端覆盖本机", "云端存档较新，已替换当前本机存档。");
           }
         });
         return;
@@ -485,6 +500,7 @@ export default function SyncPage() {
             markSynced(new Date().toISOString());
             refreshRemoteInfo();
             showMessage({ type: "success", text: "本机较新，已上传本机存档。" });
+            showReplacementNotice("已完成本机覆盖云端", "本机存档较新，已替换 WebDAV 云端存档。");
           }
         });
         return;
@@ -524,6 +540,7 @@ export default function SyncPage() {
           type: ok ? "success" : "error",
           text: ok ? "已使用云端存档覆盖本机。" : "云端存档应用失败。"
         });
+        if (ok) showReplacementNotice("已完成云端覆盖本机", "已使用 WebDAV 云端存档替换当前本机存档。");
       }
     });
   };
@@ -546,6 +563,7 @@ export default function SyncPage() {
               type: ok ? "success" : "error",
               text: ok ? "本地文件导入成功。" : "本地文件导入失败。"
             });
+            if (ok) showReplacementNotice("已完成本地文件覆盖本机", "已使用导入的 JSON 文件替换当前本机存档。");
           }
         });
       } else {
@@ -554,6 +572,7 @@ export default function SyncPage() {
           type: ok ? "success" : "error",
           text: ok ? "本地文件导入成功。" : "本地文件导入失败。"
         });
+        if (ok) showReplacementNotice("已完成本地文件导入", "本机原本没有存档，已使用导入的 JSON 文件恢复数据。");
       }
     };
     reader.readAsText(file);
@@ -700,6 +719,33 @@ export default function SyncPage() {
                 确认覆盖
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {replacementNotice ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4"
+          onClick={() => setReplacementNotice(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-emerald-200 bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100">
+                <CheckCircle2 size={24} className="text-emerald-600" />
+              </div>
+              <h3 className="text-lg font-bold text-emerald-700">{replacementNotice.title}</h3>
+              <p className="mt-2 text-sm text-slate-600">{replacementNotice.description}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplacementNotice(null)}
+              className="focus-ring mt-5 w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-700"
+            >
+              知道了
+            </button>
           </div>
         </div>
       ) : null}

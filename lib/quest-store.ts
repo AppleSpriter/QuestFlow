@@ -199,6 +199,7 @@ type QuestStore = {
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
   addTaskTodo: (taskId: string, title: string) => string | null;
+  reorderTaskTodo: (taskId: string, todoId: string, targetTodoId: string) => void;
   toggleTaskTodo: (taskId: string, todoId: string) => ProgressResult | null;
   progressTask: (taskId: string, note?: string, todo?: QuestTodoItem) => ProgressResult | null;
   useScroll: (className: ClassName) => { lineId: string; isNew: boolean; upgraded: boolean; fromTier: number; toTier: number } | null;
@@ -614,6 +615,26 @@ export const useQuestStore = create<QuestStore>()(
           dataUpdatedAt: created ? now : state.dataUpdatedAt
         }));
         return created ? todo.id : null;
+      },
+
+      reorderTaskTodo: (taskId, todoId, targetTodoId) => {
+        if (todoId === targetTodoId) return;
+        const now = new Date().toISOString();
+        let changed = false;
+        set((state) => ({
+          tasks: state.tasks.map((task) => {
+            if (task.id !== taskId) return task;
+            const fromIndex = task.todos.findIndex((todo) => todo.id === todoId);
+            const toIndex = task.todos.findIndex((todo) => todo.id === targetTodoId);
+            if (fromIndex < 0 || toIndex < 0) return task;
+            const nextTodos = [...task.todos];
+            const [movedTodo] = nextTodos.splice(fromIndex, 1);
+            nextTodos.splice(toIndex, 0, movedTodo);
+            changed = true;
+            return { ...task, todos: nextTodos, updatedAt: now };
+          }),
+          dataUpdatedAt: changed ? now : state.dataUpdatedAt
+        }));
       },
 
       toggleTaskTodo: (taskId, todoId) => {
