@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/shallow";
 import {
   getLevelProgress,
   type ProgressLog,
@@ -148,25 +149,43 @@ function buildLongRestSummary(
 }
 
 export default function QuestFlowPage() {
-  const tasks = useQuestStore((state) => state.tasks);
-  const logs = useQuestStore((state) => state.logs);
-  const focusTaskId = useQuestStore((state) => state.focusTaskId);
-  const totalXp = useQuestStore((state) => state.totalXp);
-  const streak = useQuestStore((state) => state.streak);
-  const classStates = useQuestStore((state) => state.classStates);
-  const featState = useQuestStore((state) => state.featState);
-  const progressTags = useQuestStore((state) => state.progressTags);
-  const addTask = useQuestStore((state) => state.addTask);
-  const setFocusTask = useQuestStore((state) => state.setFocusTask);
-  const updateTaskStatus = useQuestStore((state) => state.updateTaskStatus);
-  const addTaskTodo = useQuestStore((state) => state.addTaskTodo);
-  const reorderTaskTodo = useQuestStore((state) => state.reorderTaskTodo);
-  const toggleTaskTodo = useQuestStore((state) => state.toggleTaskTodo);
-  const progressTask = useQuestStore((state) => state.progressTask);
-  const updateTaskTags = useQuestStore((state) => state.updateTaskTags);
-  const completeRecurringTask = useQuestStore((state) => state.completeRecurringTask);
-  const refreshRecurringTasks = useQuestStore((state) => state.refreshRecurringTasks);
-  const chooseFeat = useQuestStore((state) => state.chooseFeat);
+  const {
+    tasks, logs, focusTaskId, totalXp, streak, classStates, featState, progressTags,
+    restState, lastProgressClass,
+  } = useQuestStore(useShallow((state) => ({
+    tasks: state.tasks,
+    logs: state.logs,
+    focusTaskId: state.focusTaskId,
+    totalXp: state.totalXp,
+    streak: state.streak,
+    classStates: state.classStates,
+    featState: state.featState,
+    progressTags: state.progressTags,
+    restState: state.restState,
+    lastProgressClass: state.lastProgressClass,
+  })));
+  const {
+    addTask, setFocusTask, updateTaskStatus, addTaskTodo, reorderTaskTodo,
+    toggleTaskTodo, progressTask, updateTaskTags, completeRecurringTask,
+    refreshRecurringTasks, chooseFeat, startShortRest, startLongRest,
+    completeRest, cancelRest,
+  } = useQuestStore(useShallow((state) => ({
+    addTask: state.addTask,
+    setFocusTask: state.setFocusTask,
+    updateTaskStatus: state.updateTaskStatus,
+    addTaskTodo: state.addTaskTodo,
+    reorderTaskTodo: state.reorderTaskTodo,
+    toggleTaskTodo: state.toggleTaskTodo,
+    progressTask: state.progressTask,
+    updateTaskTags: state.updateTaskTags,
+    completeRecurringTask: state.completeRecurringTask,
+    refreshRecurringTasks: state.refreshRecurringTasks,
+    chooseFeat: state.chooseFeat,
+    startShortRest: state.startShortRest,
+    startLongRest: state.startLongRest,
+    completeRest: state.completeRest,
+    cancelRest: state.cancelRest,
+  })));
 
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
@@ -199,13 +218,6 @@ export default function QuestFlowPage() {
   const [newResonance, setNewResonance] = useState<ResonanceTrigger | null>(null);
   const [normalResonance, setNormalResonance] = useState<ResonanceTrigger | null>(null);
   const normalResonanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const restState = useQuestStore((state) => state.restState);
-  const startShortRest = useQuestStore((state) => state.startShortRest);
-  const startLongRest = useQuestStore((state) => state.startLongRest);
-  const completeRest = useQuestStore((state) => state.completeRest);
-  const cancelRest = useQuestStore((state) => state.cancelRest);
-  const lastProgressClass = useQuestStore((state) => state.lastProgressClass);
 
   // Rest countdown timer
   useEffect(() => {
@@ -303,6 +315,7 @@ export default function QuestFlowPage() {
       return activityB - activityA;
     });
     return showAllClasses ? ordered : ordered.slice(0, 4);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classStates, focusTask?.className, lastProgressClass, showAllClasses]);
 
   const createQuest = () => {
@@ -347,7 +360,9 @@ export default function QuestFlowPage() {
   }, []);
 
   const enqueueSkillCheck = useCallback((info: SkillCheckInfo) => {
-    skillCheckQueueRef.current.push(info);
+    const q = skillCheckQueueRef.current;
+    if (q.length >= 3) return;
+    q.push(info);
     playNextSkillCheck();
   }, [playNextSkillCheck]);
 
@@ -371,7 +386,9 @@ export default function QuestFlowPage() {
   }, []);
 
   const enqueueProgress = useCallback((result: ProgressResult) => {
-    progressQueueRef.current.push(result);
+    const q = progressQueueRef.current;
+    if (q.length >= 3) return;
+    q.push(result);
     playNextProgress();
   }, [playNextProgress]);
 

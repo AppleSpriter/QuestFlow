@@ -43,7 +43,9 @@ export function Spellbook({ onClose }: { onClose: () => void }) {
   }, []);
 
   const enqueueScrollReveal = useCallback((info: ScrollRevealInfo) => {
-    scrollRevealQueueRef.current.push(info);
+    const q = scrollRevealQueueRef.current;
+    if (q.length >= 3) return;
+    q.push(info);
     playNextScrollReveal();
   }, [playNextScrollReveal]);
 

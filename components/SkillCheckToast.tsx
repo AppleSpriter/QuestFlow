@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import type { SkillCheckResult, ClassName } from "@/data/classes";
 import { CLASS_META, getTierLabel } from "@/data/classes";
@@ -17,8 +18,11 @@ export type SkillCheckInfo = {
 };
 
 export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
+  const [mounted, setMounted] = useState(false);
   const [rolling, setRolling] = useState(false);
   const [displayRoll, setDisplayRoll] = useState(1);
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!info) return;
@@ -40,7 +44,7 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
     };
   }, [info]);
 
-  return (
+  const content = (
     <AnimatePresence>
       {info ? (
         <motion.div
@@ -163,4 +167,7 @@ export function SkillCheckToast({ info }: { info: SkillCheckInfo | null }) {
       ) : null}
     </AnimatePresence>
   );
+
+  if (!mounted) return null;
+  return createPortal(content, document.body);
 }

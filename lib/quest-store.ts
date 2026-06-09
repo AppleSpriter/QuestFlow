@@ -126,6 +126,8 @@ const localStorageProvider = () => {
 };
 
 const classNames: ClassName[] = ALL_CLASSES;
+let _lastRefreshRecurringAt = 0;
+
 export const QUESTFLOW_BACKUP_VERSION = 15;
 export const QUESTFLOW_COMPATIBILITY_VERSION = 15;
 
@@ -348,17 +350,21 @@ export const useQuestStore = create<QuestStore>()(
       refreshRecurringTasks: () => {
         const nowDate = new Date();
         const now = nowDate.toISOString();
+        // Deduplicate: skip if last refresh was within 30s
+        if (Date.now() - _lastRefreshRecurringAt < 30000) return;
+
         let changed = false;
-        set((s) => {
-          const next = s.tasks.map((t) => {
+        set((state) => {
+          const next = state.tasks.map((t) => {
             const freq = getRecurringFrequency(t.tags);
             if (!freq || t.status !== "archived") return t;
             if (t.recurringCompletedKey === getRecurringKey(nowDate, freq)) return t;
             changed = true;
             return { ...t, status: "active" as QuestStatus, recurringCompletedAt: undefined, recurringCompletedKey: undefined, updatedAt: now };
           });
-          return changed ? { tasks: next, dataUpdatedAt: now } : s;
+          return changed ? { tasks: next, dataUpdatedAt: now } : state;
         });
+        _lastRefreshRecurringAt = Date.now();
       },
 
       addTaskTodo: (taskId, rawTitle) => {
