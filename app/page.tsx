@@ -380,18 +380,13 @@ export default function QuestFlowPage() {
   const activeTasks = useMemo(
     () => tasks
       .filter((t) => t.status === "active")
-      .filter(matchesSearch)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+      .filter(matchesSearch),
     [matchesSearch, tasks]
   );
   const visibleTasks = useMemo(() => {
     const filtered = tasks.filter((t) => t.status === statusFilter).filter(matchesSearch);
     if (statusFilter !== "active") return filtered;
-    return [...filtered].sort((a, b) => {
-      const aTime = new Date(a.lastFocusedAt ?? a.updatedAt).getTime();
-      const bTime = new Date(b.lastFocusedAt ?? b.updatedAt).getTime();
-      return aTime - bTime;
-    });
+    return filtered;
   }, [matchesSearch, statusFilter, tasks]);
   const focusTask = useMemo(() => tasks.find((t) => t.id === focusTaskId && t.status !== "archived"), [focusTaskId, tasks]);
   const visibleLogs = useMemo(
@@ -610,8 +605,8 @@ export default function QuestFlowPage() {
       }
       if (key === "a" && !isTypingTarget(event.target)) {
         event.preventDefault();
-        const firstTask = activeTasks[0];
-        if (firstTask) changeFocus(firstTask.id);
+        const firstActiveTask = activeTasks[0];
+        if (firstActiveTask) changeFocus(firstActiveTask.id);
       }
     };
 
