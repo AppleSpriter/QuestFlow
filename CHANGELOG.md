@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - 新增严格 normalize type guard，导入/迁移外部输入时校验日志、技能检定、专长、标签与职业状态结构
 - 新增导入前本地快照：`importData()` 写入前将当前 `questflow-v1` 保存到 `questflow-v1.backup`
 - 新增 localStorage 体积监控，持久化载荷接近 4.5MB 时输出告警
+- 新增 Electron 单实例锁，重复启动时聚焦已有窗口，避免双开抢占本地服务
+- 新增 Electron 启动/崩溃日志：写入 `userData/logs/questflow-crash.log`
 - 新增 ESLint flat config，并启用 `react-hooks/exhaustive-deps` 检查
 
 ### Changed
@@ -20,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - 拆分 `page.tsx` 与 `quest-store.ts`：任务卡、专注面板、Todo、日志、Overlay、类型和 normalizer 独立维护
 - 首页改用 `useShallow` 合并 Zustand selectors，减少无关状态订阅造成的重渲染
 - `Spellbook`、`ScrollReveal`、`NewResonanceModal`、`LongRestSummaryModal` 改为动态加载，降低首屏同步加载压力
+- Electron 启动失败改为渲染友好错误页，展示日志路径和最近 server 输出
+- `desktop:dev` 从 `wait-on` 改为健康检查脚本，等待 Next 返回非 5xx 后再启动 Electron
+- Linux 打包补充 `public/logo.png` 图标和 AppImage target
 - SkillCheck toast 改为 portal 渲染到 `document.body`，避免动画帧触发主页父级重渲染
 - Progress、SkillCheck、ScrollReveal 动画队列增加最大长度 3，连续点击时自动丢弃过量动画
 - 每日/每周任务 key、连续天数判断改用 UTC 日期，避免时区/DST 边界误判

@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --ignore-pattern .next",
-    "desktop:dev": "concurrently -k -n NEXT,ELECTRON -c cyan,magenta \"next dev -p 3100\" \"wait-on http://localhost:3100 && QUESTFLOW_DEV_URL=http://localhost:3100 electron .\"",
+    "desktop:dev": "concurrently -k -n NEXT,ELECTRON -c cyan,magenta \"next dev -p 3100\" \"node electron/wait-for-next.js http://localhost:3100 && QUESTFLOW_DEV_URL=http://localhost:3100 electron .\"",
     "desktop:dir": "next build && electron-builder --dir",
     "desktop:build": "next build && electron-builder --mac",
     "desktop:build:win": "next build && electron-builder --win --x64"
@@ -91,6 +91,13 @@
         "nsis",
         "zip"
       ]
+    },
+    "linux": {
+      "icon": "public/logo.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
     },
     "nsis": {
       "oneClick": false,

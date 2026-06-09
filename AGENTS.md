@@ -49,7 +49,8 @@ components/
   Overlays.tsx             -- Modal/overlay components for feats, resonance, rest and milestones
   TaskMapProgress.tsx      -- Quest map region progress bar
 electron/
-  main.js                  -- Electron main process, packaged Next standalone server launcher
+  main.js                  -- Electron main process, single-instance lock, startup error page, standalone server launcher
+  wait-for-next.js         -- Desktop dev health check before launching Electron
 build/
   icon.icns / icon.ico     -- Desktop app icons for macOS/Windows packaging
 public/
@@ -64,11 +65,13 @@ package.json               -- Scripts, npm package version, electron-builder con
 - Example: when the newest changelog milestone is `v1.9`, package builds should use `version: "1.9.0"`.
 - Keep README/AGENTS/changelog/package version notes aligned when a release milestone changes.
 - Desktop scripts:
-  - `npm run desktop:dev`: run Next on port 3100 and launch Electron against it.
+  - `npm run desktop:dev`: run Next on port 3100, wait for a healthy HTTP response via `electron/wait-for-next.js`, then launch Electron.
   - `npm run desktop:dir`: build Next and create an unpacked Electron app directory.
   - `npm run desktop:build`: build the macOS DMG/ZIP targets.
   - `npm run desktop:build:win`: build the Windows NSIS/ZIP x64 targets.
-- Packaged Electron starts the Next standalone server from `process.resourcesPath/next/server.js`, binds it to `127.0.0.1`, and passes `QUESTFLOW_WEBDAV_CONFIG` to keep desktop WebDAV config in Electron `userData`.
+- Electron uses `app.requestSingleInstanceLock()` so a second launch focuses the existing window instead of starting another local server.
+- Packaged Electron starts the Next standalone server from `process.resourcesPath/next/server.js`, binds it to `127.0.0.1`, writes startup/crash details to `userData/logs/questflow-crash.log`, and passes `QUESTFLOW_WEBDAV_CONFIG` to keep desktop WebDAV config in Electron `userData`.
+- Startup failures render a friendly in-app error page with the crash log path and recent server output; avoid raw `dialog.showErrorBox` for server boot failures.
 
 ## Data Persistence
 
