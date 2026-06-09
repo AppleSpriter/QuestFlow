@@ -140,24 +140,24 @@ const getRecurringFrequency = (tags: TaskTag[]): RecurringTaskFrequency | undefi
 };
 
 const getLocalDayKey = (date: Date) => {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = `${date.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getUTCDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
 
 const getRecurringKey = (date: Date, frequency: RecurringTaskFrequency) => {
   if (frequency === "daily") return getLocalDayKey(date);
   const normalized = new Date(date);
-  normalized.setHours(0, 0, 0, 0);
-  const day = normalized.getDay() || 7;
-  normalized.setDate(normalized.getDate() - day + 1);
+  // UTC Monday-based week key
+  const utcDay = normalized.getUTCDay() || 7;
+  normalized.setUTCDate(normalized.getUTCDate() - utcDay + 1);
   return getLocalDayKey(normalized);
 };
 
 const isPreviousDay = (lastDay: string, currentDay: string) => {
-  const last = new Date(`${lastDay}T00:00:00`);
-  const current = new Date(`${currentDay}T00:00:00`);
+  const last = new Date(`${lastDay}T00:00:00Z`);
+  const current = new Date(`${currentDay}T00:00:00Z`);
   const diff = current.getTime() - last.getTime();
   return diff > 0 && diff <= 36 * 60 * 60 * 1000;
 };
@@ -587,8 +587,12 @@ export const useQuestStore = create<QuestStore>()(
         try {
           const data = JSON.parse(jsonString);
           if (!data.tasks) return false;
+          // Reject data with future timestamps (>5 min buffer) to prevent malicious / broken imports
           const now = new Date().toISOString();
+          const nowTs = Date.now();
+          const futureBuffer = 5 * 60 * 1000; // 5 min clock skew tolerance
           const importedUpdatedAt = data.updatedAt ?? data.exportedAt ?? now;
+          if (new Date(importedUpdatedAt).getTime() > nowTs + futureBuffer) return false;
           const tasks = normalizeTasks(data.tasks);
           set({ tasks, logs: normalizeLogs(data.logs, tasks), focusTaskId: data.focusTaskId, totalXp: data.totalXp ?? 0, streak: data.streak ?? { count: 0 }, momentumTaskId: data.momentumTaskId, momentumCount: data.momentumCount ?? 0, classStates: normalizeClassStates(data.classStates), lastProgressDate: data.lastProgressDate, dataUpdatedAt: importedUpdatedAt, lastSyncedAt: options?.markSyncedAt ?? data.lastSyncedAt, lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined, discoveredResonances: data.discoveredResonances ?? {}, resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs(), resonanceChain: data.resonanceChain ?? { count: 0 }, featState: refreshPendingFeatChoices(normalizeClassStates(data.classStates), normalizeFeatState(data.featState), now), progressTags: normalizeProgressTags(data.progressTags) });
           return true;
@@ -621,7 +625,7 @@ export const useQuestStore = create<QuestStore>()(
         if (hasFeat(currentFeat, "meditator")) updated[tc] = { ...updated[tc], xp: updated[tc].xp + (s.restState.type === "long" ? 20 : 8) };
         const nextFeat = { ...currentFeat, shortRestCount: currentFeat.shortRestCount + (s.restState.type === "short" ? 1 : 0), longRestCount: currentFeat.longRestCount + (s.restState.type === "long" ? 1 : 0) };
         const now = new Date().toISOString();
-        set({ classStates: updated, restState: undefined, resonanceBuffs: nextBuffs, featState: refreshPendingFeatChoices(updated, nextFeat, now), dataUpdatedAt: now });
+        set({ classStates: updated, restState: undefined, resonanceBuffs: nextBuffs, resonanceChain: s.restState.type === "long" ? { count: 0 } : s.resonanceChain, featState: refreshPendingFeatChoices(updated, nextFeat, now), dataUpdatedAt: now });
       },
 
       cancelRest: () => set({ restState: undefined, dataUpdatedAt: new Date().toISOString() }),

@@ -242,7 +242,7 @@ export const normalizeClassStates = (classStates: unknown): Record<ClassName, Cl
       xp: Math.max(0, Math.floor(Number(item.xp) || 0)),
       scrolls: Math.max(0, Math.floor(Number(item.scrolls) || 0)),
       skills,
-      fatigue: Math.min(100, Math.max(0, Math.floor(Number(item.fatigue) || 0)))
+      fatigue: Math.min(120, Math.max(0, Math.floor(Number(item.fatigue) || 0)))
     };
   }
 
