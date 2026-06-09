@@ -35,7 +35,8 @@ import {
   FEAT_MAP,
   createInitialFeatState,
   refreshPendingFeatChoices,
-  hasFeat
+  hasFeat,
+  type FeatState
 } from "@/data/feats";
 import {
   makeId,
@@ -259,7 +260,7 @@ const downloadBackup = (data: QuestBackup) => {
 
 // ─── Store type ───
 
-type QuestStore = {
+type UndoSnapshot = {
   tasks: QuestTask[];
   logs: ProgressLog[];
   focusTaskId?: string;
@@ -276,8 +277,36 @@ type QuestStore = {
   discoveredResonances: Record<string, { key: string; discoveredAt: string; triggerCount: number }>;
   resonanceBuffs: ResonanceBuffs;
   resonanceChain: ResonanceChainState;
-  featState: import("@/data/feats").FeatState;
+  featState: FeatState;
   progressTags: ProgressTag[];
+};
+
+type UndoEntry = {
+  label: string;
+  createdAt: string;
+  snapshot: UndoSnapshot;
+};
+
+type QuestStoreState = {
+  tasks: QuestTask[];
+  logs: ProgressLog[];
+  focusTaskId?: string;
+  totalXp: number;
+  streak: StreakState;
+  momentumTaskId?: string;
+  momentumCount: number;
+  classStates: Record<ClassName, ClassState>;
+  lastProgressDate?: string;
+  dataUpdatedAt?: string;
+  lastSyncedAt?: string;
+  lastProgressClass?: ClassName;
+  restState?: RestState;
+  discoveredResonances: Record<string, { key: string; discoveredAt: string; triggerCount: number }>;
+  resonanceBuffs: ResonanceBuffs;
+  resonanceChain: ResonanceChainState;
+  featState: FeatState;
+  progressTags: ProgressTag[];
+  lastUndo?: UndoEntry;
   addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
   updateTaskStatus: (taskId: string, status: QuestStatus) => void;
@@ -300,9 +329,38 @@ type QuestStore = {
   getBackupData: () => QuestBackup;
   exportData: () => void;
   importData: (jsonString: string, options?: { markSyncedAt?: string }) => boolean;
+  undoLastAction: () => boolean;
+  clearUndo: () => void;
   clearAll: () => void;
   markSynced: (syncedAt: string) => void;
 };
+
+type QuestStore = QuestStoreState;
+
+const createUndoEntry = (state: QuestStoreState, label: string): UndoEntry => ({
+  label,
+  createdAt: new Date().toISOString(),
+  snapshot: {
+    tasks: state.tasks,
+    logs: state.logs,
+    focusTaskId: state.focusTaskId,
+    totalXp: state.totalXp,
+    streak: state.streak,
+    momentumTaskId: state.momentumTaskId,
+    momentumCount: state.momentumCount,
+    classStates: state.classStates,
+    lastProgressDate: state.lastProgressDate,
+    dataUpdatedAt: state.dataUpdatedAt,
+    lastSyncedAt: state.lastSyncedAt,
+    lastProgressClass: state.lastProgressClass,
+    restState: state.restState,
+    discoveredResonances: state.discoveredResonances,
+    resonanceBuffs: state.resonanceBuffs,
+    resonanceChain: state.resonanceChain,
+    featState: state.featState,
+    progressTags: state.progressTags,
+  },
+});
 
 // ─── Store ───
 
@@ -314,7 +372,7 @@ export const useQuestStore = create<QuestStore>()(
       lastProgressDate: undefined, dataUpdatedAt: undefined, lastSyncedAt: undefined,
       lastProgressClass: undefined, restState: undefined, discoveredResonances: {},
       resonanceBuffs: createInitialResonanceBuffs(), resonanceChain: { count: 0 },
-      featState: createInitialFeatState(), progressTags: [],
+      featState: createInitialFeatState(), progressTags: [], lastUndo: undefined,
 
       addTask: (rawTitle, className = "Wizard", tags = []) => {
         const title = rawTitle.trim();
@@ -550,7 +608,7 @@ export const useQuestStore = create<QuestStore>()(
 
         const updatedTask: QuestTask = { ...task, className: taskClassName, status: task.status === "paused" ? "active" : task.status, progressCount, todos: completedTodo ? task.todos.map((td) => td.id === completedTodo.id ? { ...td, completedAt: at } : td) : task.todos, updatedAt: at, lastFocusedAt: at };
 
-        set({ tasks: [...s.tasks.filter((t) => t.id !== taskId), updatedTask], logs: [log, ...s.logs], focusTaskId: taskId, totalXp: s.totalXp + totalBaseXp, streak: nextStreakSt, momentumTaskId: taskId, momentumCount: momentum, classStates: updatedClassStates, lastProgressDate: firstOfDay ? today : s.lastProgressDate, lastProgressClass: taskClassName, discoveredResonances: updatedDiscoveries, resonanceBuffs: nextBuffs, resonanceChain: { count: resonance?.chainCount ?? 0, lastClass: taskClassName }, featState: nextFeatState, dataUpdatedAt: at });
+        set({ tasks: [...s.tasks.filter((t) => t.id !== taskId), updatedTask], logs: [log, ...s.logs], focusTaskId: taskId, totalXp: s.totalXp + totalBaseXp, streak: nextStreakSt, momentumTaskId: taskId, momentumCount: momentum, classStates: updatedClassStates, lastProgressDate: firstOfDay ? today : s.lastProgressDate, lastProgressClass: taskClassName, discoveredResonances: updatedDiscoveries, resonanceBuffs: nextBuffs, resonanceChain: { count: resonance?.chainCount ?? 0, lastClass: taskClassName }, featState: nextFeatState, dataUpdatedAt: at, lastUndo: createUndoEntry(s, `撤销推进：${task.title}`) });
 
         return { taskId, taskTitle: task.title, className: taskClassName, progressCount, xpAwarded: totalBaseXp, classXpAwarded: totalClassXp, momentum, milestone: reward.milestone, newRegion: reward.newRegion, streak: nextStreakSt.count, firstOfDay, skillCheck, scrollEarned: totalScrolls > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label ?? CLASS_META[taskClassName].scrollName) : undefined, scrollCount: totalScrolls > 0 ? totalScrolls : undefined, fatigueBefore, fatigueAfter: reward.finalFatigueAfter, synergyBonus: synergyActive, resonance, at };
       },
@@ -624,14 +682,24 @@ export const useQuestStore = create<QuestStore>()(
           const tasks = normalizeTasks(data.tasks);
           const classStates = normalizeClassStates(data.classStates);
           snapshotCurrentLocalState();
-          set({ tasks, logs: normalizeLogs(data.logs, tasks), focusTaskId: typeof data.focusTaskId === "string" ? data.focusTaskId : undefined, totalXp: typeof data.totalXp === "number" ? data.totalXp : 0, streak: data.streak && typeof data.streak === "object" ? { count: Math.max(0, Math.floor(Number((data.streak as { count?: unknown }).count) || 0)), lastProgressDate: typeof (data.streak as { lastProgressDate?: unknown }).lastProgressDate === "string" ? (data.streak as { lastProgressDate: string }).lastProgressDate : undefined } : { count: 0 }, momentumTaskId: typeof data.momentumTaskId === "string" ? data.momentumTaskId : undefined, momentumCount: typeof data.momentumCount === "number" ? data.momentumCount : 0, classStates, lastProgressDate: typeof data.lastProgressDate === "string" ? data.lastProgressDate : undefined, dataUpdatedAt: importedUpdatedAt, lastSyncedAt: options?.markSyncedAt ?? (typeof data.lastSyncedAt === "string" ? data.lastSyncedAt : undefined), lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined, discoveredResonances: data.discoveredResonances && typeof data.discoveredResonances === "object" ? data.discoveredResonances as QuestStore["discoveredResonances"] : {}, resonanceBuffs: data.resonanceBuffs && typeof data.resonanceBuffs === "object" ? data.resonanceBuffs as ResonanceBuffs : createInitialResonanceBuffs(), resonanceChain: data.resonanceChain && typeof data.resonanceChain === "object" ? data.resonanceChain as ResonanceChainState : { count: 0 }, featState: refreshPendingFeatChoices(classStates, normalizeFeatState(data.featState), now), progressTags: normalizeProgressTags(data.progressTags) });
+          const previous = get();
+          set({ tasks, logs: normalizeLogs(data.logs, tasks), focusTaskId: typeof data.focusTaskId === "string" ? data.focusTaskId : undefined, totalXp: typeof data.totalXp === "number" ? data.totalXp : 0, streak: data.streak && typeof data.streak === "object" ? { count: Math.max(0, Math.floor(Number((data.streak as { count?: unknown }).count) || 0)), lastProgressDate: typeof (data.streak as { lastProgressDate?: unknown }).lastProgressDate === "string" ? (data.streak as { lastProgressDate: string }).lastProgressDate : undefined } : { count: 0 }, momentumTaskId: typeof data.momentumTaskId === "string" ? data.momentumTaskId : undefined, momentumCount: typeof data.momentumCount === "number" ? data.momentumCount : 0, classStates, lastProgressDate: typeof data.lastProgressDate === "string" ? data.lastProgressDate : undefined, dataUpdatedAt: importedUpdatedAt, lastSyncedAt: options?.markSyncedAt ?? (typeof data.lastSyncedAt === "string" ? data.lastSyncedAt : undefined), lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined, discoveredResonances: data.discoveredResonances && typeof data.discoveredResonances === "object" ? data.discoveredResonances as QuestStore["discoveredResonances"] : {}, resonanceBuffs: data.resonanceBuffs && typeof data.resonanceBuffs === "object" ? data.resonanceBuffs as ResonanceBuffs : createInitialResonanceBuffs(), resonanceChain: data.resonanceChain && typeof data.resonanceChain === "object" ? data.resonanceChain as ResonanceChainState : { count: 0 }, featState: refreshPendingFeatChoices(classStates, normalizeFeatState(data.featState), now), progressTags: normalizeProgressTags(data.progressTags), lastUndo: createUndoEntry(previous, "撤销导入覆盖") });
           return true;
         } catch { return false; }
       },
 
+      undoLastAction: () => {
+        const undo = get().lastUndo;
+        if (!undo) return false;
+        set({ ...undo.snapshot, dataUpdatedAt: new Date().toISOString(), lastUndo: undefined });
+        return true;
+      },
+
+      clearUndo: () => set({ lastUndo: undefined }),
+
       clearAll: () => {
         const now = new Date().toISOString();
-        set({ tasks: [], logs: [], focusTaskId: undefined, totalXp: 0, streak: { count: 0 }, momentumTaskId: undefined, momentumCount: 0, classStates: initClassState(), lastProgressDate: undefined, dataUpdatedAt: now, lastSyncedAt: undefined, lastProgressClass: undefined, restState: undefined, discoveredResonances: {}, resonanceBuffs: createInitialResonanceBuffs(), resonanceChain: { count: 0 }, featState: createInitialFeatState(), progressTags: [] });
+        set({ tasks: [], logs: [], focusTaskId: undefined, totalXp: 0, streak: { count: 0 }, momentumTaskId: undefined, momentumCount: 0, classStates: initClassState(), lastProgressDate: undefined, dataUpdatedAt: now, lastSyncedAt: undefined, lastProgressClass: undefined, restState: undefined, discoveredResonances: {}, resonanceBuffs: createInitialResonanceBuffs(), resonanceChain: { count: 0 }, featState: createInitialFeatState(), progressTags: [], lastUndo: undefined });
       },
 
       startShortRest: () => { if (get().restState) return; const now = new Date(); set({ restState: { type: "short", startedAt: now.toISOString(), endsAt: new Date(now.getTime() + 5 * 60 * 1000).toISOString() }, dataUpdatedAt: now.toISOString() }); },
@@ -667,7 +735,7 @@ export const useQuestStore = create<QuestStore>()(
         if (!choice || !choice.choices.includes(featId) || !FEAT_MAP[featId] || current.owned.some((f) => f.id === featId)) return false;
         const now = new Date().toISOString();
         const nextFeat = { ...current, owned: [...current.owned, { id: featId, className: choice.className, selectedAt: now, level: choice.level }], pending: current.pending.filter((c) => c.id !== choiceId) };
-        set({ featState: refreshPendingFeatChoices(s.classStates, nextFeat, now), dataUpdatedAt: now });
+        set({ featState: refreshPendingFeatChoices(s.classStates, nextFeat, now), dataUpdatedAt: now, lastUndo: createUndoEntry(s, "撤销专长选择") });
         return true;
       },
 
@@ -677,6 +745,10 @@ export const useQuestStore = create<QuestStore>()(
       name: STORAGE_KEY,
       storage: createJSONStorage(localStorageProvider),
       version: QUESTFLOW_BACKUP_VERSION,
+      partialize: (state) => {
+        const { lastUndo, ...persisted } = state;
+        return persisted;
+      },
       migrate: (persistedState: unknown, version: number) => {
         const persisted = persistedState as Record<string, unknown>;
         let data = persisted;

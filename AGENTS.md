@@ -21,9 +21,9 @@ Core loop: push task → class XP → skill check → earn scrolls → learn/upg
 
 ```
 app/
-  globals.css              -- Global styles, CSS variables, particle/glow animations
+  globals.css              -- Global styles, CSS variables, dark theme, touch/focus accessibility, particle/glow animations
   layout.tsx               -- Root layout (lang="zh-CN"), favicon via /logo.png
-  page.tsx                 -- Main page shell, Zustand subscriptions, animation queues, task/rest orchestration
+  page.tsx                 -- Main page shell, search/shortcuts/theme toggle, Zustand subscriptions, animation queues, task/rest orchestration
   api/webdav/              -- WebDAV proxy route handlers
   sync/page.tsx            -- Cloud sync configuration page
   resonance/page.tsx       -- Class resonance temple matrix / collection page
@@ -62,13 +62,15 @@ package.json               -- Scripts, npm package version, electron-builder con
 ## Versioning and Packaging
 
 - The packaged app version in `package.json` must track the latest current development entry in `CHANGELOG.md`.
-- Example: when the newest changelog milestone is `v1.9`, package builds should use `version: "1.9.0"`.
+- Example: when the newest changelog milestone is `v2.0`, package builds should use `version: "2.0.0"`.
 - Keep README/AGENTS/changelog/package version notes aligned when a release milestone changes.
 - Desktop scripts:
   - `npm run desktop:dev`: run Next on port 3100, wait for a healthy HTTP response via `electron/wait-for-next.js`, then launch Electron.
   - `npm run desktop:dir`: build Next and create an unpacked Electron app directory.
-  - `npm run desktop:build`: build the macOS DMG/ZIP targets.
+  - `npm run desktop:build`: build the macOS DMG target.
   - `npm run desktop:build:win`: build the Windows NSIS/ZIP x64 targets.
+  - `npm run desktop:build:linux`: build the Linux AppImage target.
+  - `npm run desktop:build:all`: run one Next standalone build, then package macOS, Windows, and Linux sequentially to avoid concurrent `.next` races.
 - Electron uses `app.requestSingleInstanceLock()` so a second launch focuses the existing window instead of starting another local server.
 - Packaged Electron starts the Next standalone server from `process.resourcesPath/next/server.js`, binds it to `127.0.0.1`, writes startup/crash details to `userData/logs/questflow-crash.log`, and passes `QUESTFLOW_WEBDAV_CONFIG` to keep desktop WebDAV config in Electron `userData`.
 - Startup failures render a friendly in-app error page with the crash log path and recent server output; avoid raw `dialog.showErrorBox` for server boot failures.
@@ -103,6 +105,7 @@ package.json               -- Scripts, npm package version, electron-builder con
 | featState | FeatState | Permanent selected feats, pending 3-choice feat points, daily feat usage and rest counters |
 | dataUpdatedAt | string \| undefined | Last data change timestamp (for WebDAV sync) |
 | lastSyncedAt | string \| undefined | Last successful WebDAV sync timestamp |
+| lastUndo | UndoEntry \| undefined | Ephemeral, non-persisted one-step undo snapshot for progress, feat choice, and import overwrite |
 
 ### Key Types
 
@@ -203,7 +206,7 @@ type FeatState = {
 - `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `15`.
 - `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, resonance chain, and feat state.
 - `updatedAt` is derived from `dataUpdatedAt`, task `updatedAt`, and log `at` so WebDAV conflict checks can compare local vs remote freshness.
-- `importData()` validates future timestamps, snapshots current localStorage to `questflow-v1.backup`, and normalizes via strict type guards before writing; use it for local file import and WebDAV restore instead of manually assigning persisted data.
+- `importData()` validates future timestamps, snapshots current localStorage to `questflow-v1.backup`, stores a one-step undo snapshot, and normalizes via strict type guards before writing; use it for local file import and WebDAV restore instead of manually assigning persisted data.
 - If the store schema changes, bump the persist/backup version together and add a migration path before changing sync or import behavior.
 
 ## Class System
@@ -254,7 +257,7 @@ Key functions: `getTierFromCopies()`, `getCopiesForTier()`, `getNextTierCopies()
 Defined in `data/feats.ts`, each class earns one permanent feat point at Lv4/Lv8/Lv12/Lv16...
 
 - Feat choices are stored in `featState.pending`; each point presents 3 deterministic choices.
-- Selected feats are stored in `featState.owned` and are not resettable in v1.8.
+- Selected feats are stored in `featState.owned`; the most recent selection can be restored via the one-step undo toast.
 - Feat selection uses a two-step confirmation flow; the modal can be dismissed and pending choices can be completed later on `/build`.
 - Feat flows: learning, focus, luck, resonance, collection, rest.
 - Feat qualities: common, rare, epic, legendary.
@@ -367,7 +370,7 @@ All animations use refs-based queues to prevent overlap when users click rapidly
 - **ProgressBurst** (`+1` burst): `progressQueueRef` → `enqueueProgress()`, max queued items 3, 1200ms per item + 180ms gap
 - **SkillCheckToast** (dice roll result): `skillCheckQueueRef` → `enqueueSkillCheck()`, max queued items 3, portal-rendered, 3000ms per item + 180ms gap
 - **NormalResonanceEffect**: lightweight 1s non-blocking right-side resonance animation
-- **NewResonanceModal**: lazy-loaded 2~3s discovery modal for first-time resonance unlock
+- **NewResonanceModal**: lazy-loaded 2~3s discovery modal for first-time resonance unlock; backdrop click closes it
 - **ScrollReveal** (scroll opening): lazy-loaded by Spellbook, `scrollRevealQueueRef` → `enqueueScrollReveal()`, max queued items 3, 2800ms per item + 180ms gap
 
 Each queue: silently drop when queue length is already 3, otherwise push to ref array → `playNext*()` checks `playingRef` flag → plays → setTimeout clears → next with gap.
@@ -376,6 +379,7 @@ Each queue: silently drop when queue length is already 3, otherwise push to ref 
 
 ```
 page.tsx
+  ├── GlobalSearch/Shortcuts ← search tasks/logs/events, Ctrl/Cmd+K/N/A, dark theme toggle, undo toast
   ├── SkillCheckToast        ← skill check result (dice/success/failure/scroll/resonance)
   ├── NewResonanceModal      ← first-time resonance discovery modal
   ├── NormalResonanceEffect  ← regular resonance trigger effect
@@ -416,6 +420,7 @@ Zustand persist `version: 15`, `migrate` function handles:
 - **Animation queues**: Never set animation state directly on user action; always enqueue via refs to prevent overlap.
 - **Zustand for data clearing**: Use `clearAll()` action, not direct `localStorage.removeItem()` (persist middleware may rewrite on unmount).
 - **Store actions are the single source of truth**: All state mutations go through Zustand actions in `quest-store.ts`.
+- **One-step undo**: `progressTask()`, `chooseFeat()`, and `importData()` create non-persisted `lastUndo`; keep undo snapshots out of Zustand `partialize` persisted data.
 - **Active task ordering**: `setFocusTask()` only changes `focusTaskId` and must not reorder tasks; `progressTask()` appends the progressed task to the end of `tasks` and updates `lastFocusedAt`; the quick active-task selector sorts by `createdAt` so it stays stable for finding tasks.
 - **Task class mapping**: `getTaskClass(task)` determines which class a task belongs to (from `task.className`).
 - **Resonance keys**: Always use `getResonanceKey(a, b)` so class pairs are order-independent.
@@ -426,6 +431,6 @@ Zustand persist `version: 15`, `migrate` function handles:
 
 - Run `npm run build` for Next.js production build checks after app/store/data changes.
 - Run `npm run desktop:dir` after Electron packaging or standalone-server resource changes.
-- Run `npm run desktop:build` / `npm run desktop:build:win` only when verifying release artifacts for the target platform.
+- Run `npm run desktop:build` / `npm run desktop:build:win` / `npm run desktop:build:linux` only when verifying release artifacts for one target; use `npm run desktop:build:all` for full sequential release packaging.
 - For WebDAV changes, verify `/sync`, `/api/webdav`, and config persistence behavior in both browser dev mode and packaged Electron mode when relevant.
 - For persisted store changes, test migration/import with an older backup and confirm `questflow-v1` localStorage data still hydrates.

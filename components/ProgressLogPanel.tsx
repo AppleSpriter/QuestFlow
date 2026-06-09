@@ -15,13 +15,13 @@ const formatLogTime = (iso: string) =>
     month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
   }).format(new Date(iso));
 
-export function ProgressLogPanel({ logs, task }: { logs: ProgressLog[]; task?: QuestTask }) {
+export function ProgressLogPanel({ logs, task, title = "Progress Log", subtitle }: { logs: ProgressLog[]; task?: QuestTask; title?: string; subtitle?: string }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-950">Progress Log</h2>
-          <p className="mt-1 text-sm text-slate-500">{task ? task.title : "No focus quest"}</p>
+          <h2 className="text-lg font-semibold text-slate-950">{title}</h2>
+          <p className="mt-1 text-sm text-slate-500">{subtitle ?? (task ? task.title : "No focus quest")}</p>
         </div>
         <ChevronRight size={19} className="text-slate-400" />
       </div>

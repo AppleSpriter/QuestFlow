@@ -117,6 +117,10 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="新共鸣发现"
     >
       <motion.div
         className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/80 bg-white p-6 text-center shadow-2xl"
@@ -124,6 +128,7 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.94, y: 12 }}
         transition={{ duration: 0.35, ease: "easeOut" }}
+        onClick={(event) => event.stopPropagation()}
       >
         <motion.div
           className="absolute inset-0 bg-gradient-to-br from-violet-100/80 via-transparent to-amber-100/80"
@@ -174,14 +179,14 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
             <Link
               href="/resonance"
               onClick={onClose}
-              className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800 active:scale-[0.98]"
+              className="focus-ring inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-800 active:scale-[0.98]"
             >
               查看详情
             </Link>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98]"
+              className="focus-ring rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98]"
             >
               继续冒险
             </button>
@@ -215,7 +220,9 @@ export function FeatChoiceModal({ choice, onClose, onSelect }: { choice: Pending
                 key={feat.id}
                 type="button"
                 onClick={() => setSelectedFeatId(feat.id)}
-                className={`group rounded-3xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-amber-300 hover:shadow-lift active:scale-[0.98] ${selected ? "border-amber-400 ring-4 ring-amber-100" : "border-slate-200"}`}
+                className={`focus-ring group rounded-3xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-amber-300 hover:shadow-lift active:scale-[0.98] ${selected ? "border-amber-400 ring-4 ring-amber-100" : "border-slate-200"}`}
+                aria-pressed={selected}
+                aria-label={`选择专长 ${feat.name}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="text-3xl">{feat.emoji}</div>
@@ -262,8 +269,11 @@ export function LongRestSummaryModal({ summary, onClose }: { summary: LongRestSu
       exit={{ opacity: 0 }}
       onClick={onClose}
     >
-      <motion.div
-        className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+          <motion.div
+            className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="今日冒险总结"
         initial={{ scale: 0.9, y: 20 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.9, y: 20 }}

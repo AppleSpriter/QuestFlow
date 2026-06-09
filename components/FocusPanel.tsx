@@ -90,7 +90,7 @@ export function FocusPanel({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white">
           <Target size={17} />
-          当前专注
+          当前专注 <span className="text-xs font-bold opacity-70">(Ctrl+A)</span>
         </div>
         {task ? (
           <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${classStyles[taskClass]}`}>

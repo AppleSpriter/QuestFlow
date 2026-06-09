@@ -1,6 +1,6 @@
 {
   "name": "questflow-v1",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "description": "QuestFlow desktop progress tracker",
   "author": "QuestFlow",
   "private": true,
@@ -13,7 +13,9 @@
     "desktop:dev": "concurrently -k -n NEXT,ELECTRON -c cyan,magenta \"next dev -p 3100\" \"node electron/wait-for-next.js http://localhost:3100 && QUESTFLOW_DEV_URL=http://localhost:3100 electron .\"",
     "desktop:dir": "next build && electron-builder --dir",
     "desktop:build": "next build && electron-builder --mac",
-    "desktop:build:win": "next build && electron-builder --win --x64"
+    "desktop:build:win": "next build && electron-builder --win --x64",
+    "desktop:build:linux": "next build && electron-builder --linux",
+    "desktop:build:all": "next build && electron-builder --mac && electron-builder --win --x64 && electron-builder --linux"
   },
   "dependencies": {
     "framer-motion": "^12.0.0",

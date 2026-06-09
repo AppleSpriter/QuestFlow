@@ -4,12 +4,16 @@ All notable changes to QuestFlow will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## v1.10 - 2026-06
+## v2.0 - 2026-06
 
-结构拆分、性能与数据安全更新：拆分主页/Store 巨型文件，降低动画阻塞与首屏负载，并加强导入和持久化边界保护。
+桌面稳定性、架构拆分与可逆操作大版本更新：从 v1.9 起完成主页/Store 拆分、数据安全加固、Electron 启动稳定性、全局搜索、快捷键、撤销、暗色主题和可访问性升级。
 
 ### Added
 
+- 新增全局搜索框，可搜索任务标题、职业/工作类型、任务标签、事件类型、日期、Todo、共鸣、卷轴和 Progress 日志内容
+- 新增键盘快捷键：`Ctrl/Cmd+K` 聚焦搜索、`Ctrl/Cmd+N` 打开新建任务、`Ctrl/Cmd+A` 快速专注搜索结果中的第一项 Active 任务
+- 新增一次性撤销机制：推进任务、选错专长、导入覆盖后可通过底部提示条恢复上一步状态
+- 新增暗色主题切换、触屏点击区优化和更多 `focus-ring` / `aria-label` / `aria-expanded` 可访问性属性
 - 新增严格 normalize type guard，导入/迁移外部输入时校验日志、技能检定、专长、标签与职业状态结构
 - 新增导入前本地快照：`importData()` 写入前将当前 `questflow-v1` 保存到 `questflow-v1.backup`
 - 新增 localStorage 体积监控，持久化载荷接近 4.5MB 时输出告警
@@ -19,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- 升级应用版本为 `2.0.0`，README、AGENTS、CHANGELOG 与打包版本同步到 v2.0
 - 拆分 `page.tsx` 与 `quest-store.ts`：任务卡、专注面板、Todo、日志、Overlay、类型和 normalizer 独立维护
 - 首页改用 `useShallow` 合并 Zustand selectors，减少无关状态订阅造成的重渲染
 - `Spellbook`、`ScrollReveal`、`NewResonanceModal`、`LongRestSummaryModal` 改为动态加载，降低首屏同步加载压力
@@ -31,11 +36,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- 新共鸣发现弹窗支持点击周围遮罩关闭，降低首次共鸣动画对连续操作的打断
 - 修正 `refreshRecurringTasks()` 多触发源 30 秒内重复 set/persist 的问题
 - 修正长休后 `resonanceChain` 不重置导致跨休息连锁累积的问题
 - 修正导入未来时间戳存档的问题：超过本机时间 5 分钟会拒绝导入
 - 修正精力管理专长下历史存档疲劳 normalize 上限仍为 100 的问题，现在允许 0~120
-- 同步 AGENTS 文档中任务排序、persist 内容、疲劳上限和周期任务 UTC key 描述
+- 同步 AGENTS 文档中任务排序、persist 内容、疲劳上限、周期任务 UTC key、撤销和桌面打包描述
 
 ## v1.9 - 2026-06
 

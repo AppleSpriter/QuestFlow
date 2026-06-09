@@ -11,8 +11,11 @@ import {
   Cloud,
   Coffee,
   Flame,
+  Moon,
   Plus,
+  Search,
   Sparkles,
+  Sun,
   Tags,
   Target,
   Tent,
@@ -110,7 +113,36 @@ const regionBackgrounds: Record<string, string> = {
   legend: "linear-gradient(180deg, #faf5ff 0%, #e9d5ff 45%, #a855f7 100%)"
 };
 
+const darkRegionBackgrounds: Record<string, string> = {
+  camp: "radial-gradient(circle at 20% 0%, rgba(148, 163, 184, 0.18), transparent 32%), linear-gradient(180deg, #0f172a 0%, #111827 48%, #020617 100%)",
+  trail: "radial-gradient(circle at 20% 0%, rgba(249, 115, 22, 0.18), transparent 34%), linear-gradient(180deg, #1c1917 0%, #0f172a 55%, #020617 100%)",
+  forest: "radial-gradient(circle at 20% 0%, rgba(34, 197, 94, 0.18), transparent 34%), linear-gradient(180deg, #052e16 0%, #0f172a 58%, #020617 100%)",
+  ruins: "radial-gradient(circle at 20% 0%, rgba(148, 163, 184, 0.2), transparent 34%), linear-gradient(180deg, #1e293b 0%, #0f172a 55%, #020617 100%)",
+  canyon: "radial-gradient(circle at 20% 0%, rgba(239, 68, 68, 0.2), transparent 34%), linear-gradient(180deg, #3f1d1d 0%, #111827 56%, #020617 100%)",
+  swamp: "radial-gradient(circle at 20% 0%, rgba(20, 184, 166, 0.18), transparent 34%), linear-gradient(180deg, #042f2e 0%, #0f172a 56%, #020617 100%)",
+  tower: "radial-gradient(circle at 20% 0%, rgba(59, 130, 246, 0.2), transparent 34%), linear-gradient(180deg, #172554 0%, #0f172a 58%, #020617 100%)",
+  library: "radial-gradient(circle at 20% 0%, rgba(139, 92, 246, 0.22), transparent 34%), linear-gradient(180deg, #2e1065 0%, #111827 56%, #020617 100%)",
+  forge: "radial-gradient(circle at 20% 0%, rgba(251, 146, 60, 0.22), transparent 34%), linear-gradient(180deg, #431407 0%, #111827 56%, #020617 100%)",
+  citadel: "radial-gradient(circle at 20% 0%, rgba(234, 179, 8, 0.2), transparent 34%), linear-gradient(180deg, #422006 0%, #111827 56%, #020617 100%)",
+  abyss: "radial-gradient(circle at 20% 0%, rgba(71, 85, 105, 0.3), transparent 34%), linear-gradient(180deg, #020617 0%, #0f172a 58%, #000 100%)",
+  astral: "radial-gradient(circle at 20% 0%, rgba(99, 102, 241, 0.24), transparent 34%), linear-gradient(180deg, #1e1b4b 0%, #111827 56%, #020617 100%)",
+  lab: "radial-gradient(circle at 20% 0%, rgba(14, 165, 233, 0.22), transparent 34%), linear-gradient(180deg, #082f49 0%, #0f172a 58%, #020617 100%)",
+  throne: "radial-gradient(circle at 20% 0%, rgba(244, 63, 94, 0.22), transparent 34%), linear-gradient(180deg, #4c0519 0%, #111827 56%, #020617 100%)",
+  legend: "radial-gradient(circle at 20% 0%, rgba(168, 85, 247, 0.24), transparent 34%), linear-gradient(180deg, #3b0764 0%, #111827 56%, #020617 100%)"
+};
+
 const classNames: ClassName[] = ALL_CLASSES;
+
+const formatSearchDate = (iso?: string) => {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return [
+    iso,
+    new Intl.DateTimeFormat("zh-CN", { dateStyle: "short" }).format(date),
+    new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date),
+  ].join(" ");
+};
 
 type LongRestClassState = {
   xp: number;
@@ -153,7 +185,7 @@ function buildLongRestSummary(
 export default function QuestFlowPage() {
   const {
     tasks, logs, focusTaskId, totalXp, streak, classStates, featState, progressTags,
-    restState, lastProgressClass,
+    restState, lastProgressClass, lastUndo,
   } = useQuestStore(useShallow((state) => ({
     tasks: state.tasks,
     logs: state.logs,
@@ -165,12 +197,13 @@ export default function QuestFlowPage() {
     progressTags: state.progressTags,
     restState: state.restState,
     lastProgressClass: state.lastProgressClass,
+    lastUndo: state.lastUndo,
   })));
   const {
     addTask, setFocusTask, updateTaskStatus, addTaskTodo, reorderTaskTodo,
     toggleTaskTodo, progressTask, updateTaskTags, completeRecurringTask,
     refreshRecurringTasks, chooseFeat, startShortRest, startLongRest,
-    completeRest, cancelRest,
+    completeRest, cancelRest, undoLastAction, clearUndo,
   } = useQuestStore(useShallow((state) => ({
     addTask: state.addTask,
     setFocusTask: state.setFocusTask,
@@ -187,10 +220,14 @@ export default function QuestFlowPage() {
     startLongRest: state.startLongRest,
     completeRest: state.completeRest,
     cancelRest: state.cancelRest,
+    undoLastAction: state.undoLastAction,
+    clearUndo: state.clearUndo,
   })));
 
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [darkMode, setDarkMode] = useState(false);
   const [selectedClass, setSelectedClass] = useState<ClassName>("Wizard");
   const [statusFilter, setStatusFilter] = useState<QuestStatus>("active");
   const [progressNote, setProgressNote] = useState("");
@@ -201,6 +238,8 @@ export default function QuestFlowPage() {
   const [createdQuestTitle, setCreatedQuestTitle] = useState<string | null>(null);
   const [celebration, setCelebration] = useState<ProgressResult | null>(null);
   const [skillCheckInfo, setSkillCheckInfo] = useState<SkillCheckInfo | null>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const progressQueueRef = useRef<ProgressResult[]>([]);
   const progressPlayingRef = useRef(false);
   const skillCheckQueueRef = useRef<SkillCheckInfo[]>([]);
@@ -211,6 +250,7 @@ export default function QuestFlowPage() {
   const [restCountdown, setRestCountdown] = useState<number | null>(null);
   const [showRestCompleteConfirm, setShowRestCompleteConfirm] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showSearchPanel, setShowSearchPanel] = useState(false);
   const [showPartyStatus, setShowPartyStatus] = useState(true);
   const [showAllClasses, setShowAllClasses] = useState(false);
   const [todoTitle, setTodoTitle] = useState("");
@@ -276,30 +316,97 @@ export default function QuestFlowPage() {
     if (normalResonanceTimerRef.current) clearTimeout(normalResonanceTimerRef.current);
   }, []);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", darkMode);
+    document.documentElement.dataset.theme = darkMode ? "dark" : "light";
+  }, [darkMode]);
+
+  const taskSearchText = useCallback((task: QuestTask) => {
+    const taskClass = getTaskClass(task);
+    const meta = CLASS_META[taskClass];
+    return [
+      task.title,
+      task.status,
+      taskClass,
+      meta.label,
+      meta.emoji,
+      task.tags.map((tag) => TAG_META[tag]?.label ?? tag).join(" "),
+      formatSearchDate(task.createdAt),
+      formatSearchDate(task.updatedAt),
+      formatSearchDate(task.lastFocusedAt),
+      formatSearchDate(task.recurringCompletedAt),
+      task.todos.map((todo) => `${todo.title} ${formatSearchDate(todo.completedAt)}`).join(" "),
+    ].filter(Boolean).join(" ").toLocaleLowerCase("zh-CN");
+  }, []);
+
+  const logSearchText = useCallback((log: ProgressLog) => {
+    const task = tasks.find((item) => item.id === log.taskId);
+    const taskClass = log.className && CLASS_META[log.className] ? log.className : "Wizard";
+    const meta = CLASS_META[taskClass];
+    return [
+      log.type,
+      log.type === "scroll" ? "卷轴 scroll" : "推进 progress 事件",
+      log.note,
+      formatSearchDate(log.at),
+      taskClass,
+      meta.label,
+      meta.emoji,
+      task?.title,
+      log.resonanceKey,
+      log.resonanceName,
+      log.resonanceReward,
+      log.scrollEarned,
+      log.newSkill,
+      log.skillUpgrade?.name,
+      log.todoTitle,
+      log.progressTags?.map((tag) => tag.name).join(" "),
+    ].filter(Boolean).join(" ").toLocaleLowerCase("zh-CN");
+  }, [tasks]);
+
+  const normalizedSearch = searchQuery.trim().toLocaleLowerCase("zh-CN");
+  const searchLogMatches = useMemo(
+    () => normalizedSearch ? logs.filter((log) => logSearchText(log).includes(normalizedSearch)) : [],
+    [logSearchText, logs, normalizedSearch]
+  );
+  const searchMatchedTaskIds = useMemo(
+    () => new Set(searchLogMatches.map((log) => log.taskId)),
+    [searchLogMatches]
+  );
+  const matchesSearch = useCallback((task: QuestTask) => {
+    if (!normalizedSearch) return true;
+    return taskSearchText(task).includes(normalizedSearch) || searchMatchedTaskIds.has(task.id);
+  }, [normalizedSearch, searchMatchedTaskIds, taskSearchText]);
+
   const activeTasks = useMemo(
     () => tasks
       .filter((t) => t.status === "active")
+      .filter(matchesSearch)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [tasks]
+    [matchesSearch, tasks]
   );
   const visibleTasks = useMemo(() => {
-    const filtered = tasks.filter((t) => t.status === statusFilter);
+    const filtered = tasks.filter((t) => t.status === statusFilter).filter(matchesSearch);
     if (statusFilter !== "active") return filtered;
     return [...filtered].sort((a, b) => {
       const aTime = new Date(a.lastFocusedAt ?? a.updatedAt).getTime();
       const bTime = new Date(b.lastFocusedAt ?? b.updatedAt).getTime();
       return aTime - bTime;
     });
-  }, [statusFilter, tasks]);
+  }, [matchesSearch, statusFilter, tasks]);
   const focusTask = useMemo(() => tasks.find((t) => t.id === focusTaskId && t.status !== "archived"), [focusTaskId, tasks]);
-  const focusLogs = useMemo(
-    () => logs.filter((log) => log.taskId === focusTask?.id || log.type === 'scroll').slice(0, 8),
-    [focusTask?.id, logs]
+  const visibleLogs = useMemo(
+    () => (normalizedSearch
+      ? searchLogMatches
+      : logs.filter((log) => log.taskId === focusTask?.id || log.type === "scroll")
+    ).slice(0, 12),
+    [focusTask?.id, logs, normalizedSearch, searchLogMatches]
   );
   const level = getLevelProgress(totalXp);
 
   const focusRegionId = focusTask ? "camp" : "camp";
-  const focusBg = regionBackgrounds[focusRegionId] ?? regionBackgrounds.camp;
+  const focusBg = darkMode
+    ? darkRegionBackgrounds[focusRegionId] ?? darkRegionBackgrounds.camp
+    : regionBackgrounds[focusRegionId] ?? regionBackgrounds.camp;
   const activeFeatChoice = useMemo(
     () => featState.pending.find((choice) => choice.id === activeFeatChoiceId)
       ?? featState.pending.find((choice) => !dismissedFeatChoiceIds.includes(choice.id)),
@@ -339,12 +446,12 @@ export default function QuestFlowPage() {
     createQuest();
   };
 
-  const changeFocus = (taskId: string) => {
+  const changeFocus = useCallback((taskId: string) => {
     if (taskId === focusTaskId) return;
     setFocusTask(taskId);
     setFocusFlash(true);
     setTimeout(() => setFocusFlash(false), 320);
-  };
+  }, [focusTaskId, setFocusTask]);
 
   const playNextSkillCheck = useCallback(() => {
     if (skillCheckPlayingRef.current) return;
@@ -477,6 +584,41 @@ export default function QuestFlowPage() {
     setDismissedFeatChoiceIds((ids) => ids.includes(choiceId) ? ids : [...ids, choiceId]);
   };
 
+  useEffect(() => {
+    const isTypingTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable;
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "k") {
+        event.preventDefault();
+        setShowSearchPanel(true);
+        window.requestAnimationFrame(() => {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        });
+        return;
+      }
+      if (key === "n") {
+        event.preventDefault();
+        setShowCreateForm(true);
+        window.requestAnimationFrame(() => titleInputRef.current?.focus());
+        return;
+      }
+      if (key === "a" && !isTypingTarget(event.target)) {
+        event.preventDefault();
+        const firstTask = activeTasks[0];
+        if (firstTask) changeFocus(firstTask.id);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeTasks, changeFocus]);
+
   if (!mounted) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-6xl items-center justify-center px-4 text-sm text-slate-500">
@@ -499,12 +641,32 @@ export default function QuestFlowPage() {
         {normalResonance ? <NormalResonanceEffect key={`normal-resonance-${normalResonance.key}-${normalResonance.triggerCount}`} resonance={normalResonance} /> : null}
         {newResonance ? <NewResonanceModal key={`new-resonance-${newResonance.key}`} resonance={newResonance} discoveredCount={Object.keys(useQuestStore.getState().discoveredResonances).length} onClose={() => setNewResonance(null)} /> : null}
         {activeFeatChoice ? <FeatChoiceModal key={activeFeatChoice.id} choice={activeFeatChoice} onClose={dismissFeatChoice} onSelect={selectFeat} /> : null}
+        {lastUndo ? (
+          <motion.div
+            key={lastUndo.createdAt}
+            className="fixed inset-x-0 bottom-4 z-50 mx-auto flex w-[min(calc(100vw-2rem),30rem)] items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 text-sm shadow-2xl backdrop-blur dark:border-slate-700 dark:bg-slate-900/95"
+            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 18, scale: 0.98 }}
+            role="status"
+          >
+            <span className="min-w-0 truncate font-bold text-slate-700 dark:text-slate-100">{lastUndo.label}</span>
+            <span className="flex shrink-0 items-center gap-2">
+              <button type="button" onClick={undoLastAction} className="focus-ring rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-black text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-950" aria-label={lastUndo.label}>
+                撤销
+              </button>
+              <button type="button" onClick={clearUndo} className="focus-ring rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold text-slate-500 transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" aria-label="关闭撤销提示">
+                关闭
+              </button>
+            </span>
+          </motion.div>
+        ) : null}
       </AnimatePresence>
 
       <SkillCheckToast info={skillCheckInfo} />
 
       {/* Header */}
-      <header className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <header className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between dark:text-slate-100">
         <div>
           <div className="flex items-center gap-2">
             <Image
@@ -520,7 +682,7 @@ export default function QuestFlowPage() {
           <p className="mt-1 text-sm text-slate-500">DnD Progress Tracker for agent-heavy work</p>
         </div>
 
-        <section className="grid grid-cols-3 gap-2 sm:min-w-[440px]">
+        <section className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-3 sm:min-w-[440px]" aria-label="核心指标">
           <Metric label={`Level ${level.level}`} value={`${level.current} / ${level.required} XP`}>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
               <motion.div
@@ -541,7 +703,7 @@ export default function QuestFlowPage() {
       </header>
 
       {/* Party Status */}
-      <section className="mb-3 rounded-xl border border-slate-200 bg-white/75 p-2 shadow-sm backdrop-blur">
+      <section className="mb-3 rounded-xl border border-slate-200 bg-white/75 p-2 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/75" aria-label="队伍职业状态">
         <div className="mb-2 flex items-center justify-between gap-2 px-1">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Party Status</div>
@@ -552,7 +714,8 @@ export default function QuestFlowPage() {
               <button
                 type="button"
                 onClick={() => setShowAllClasses((value) => !value)}
-                className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97]"
+                className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                aria-label={showAllClasses ? "收起职业状态到四个" : "展开全部职业状态"}
               >
                 {showAllClasses ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                 {showAllClasses ? "显示 4 个" : `展开全部 ${ALL_CLASSES.length}`}
@@ -561,7 +724,9 @@ export default function QuestFlowPage() {
             <button
               type="button"
               onClick={() => setShowPartyStatus((value) => !value)}
-              className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97]"
+              className="focus-ring inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 active:scale-[0.97] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              aria-expanded={showPartyStatus}
+              aria-label={showPartyStatus ? "收起队伍状态" : "展开队伍状态"}
             >
               {showPartyStatus ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               {showPartyStatus ? "收起" : "展开"}
@@ -677,7 +842,7 @@ export default function QuestFlowPage() {
       </section>
 
       {/* Action bar */}
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-3 flex flex-wrap gap-2" aria-label="快捷操作栏">
         <button
           type="button"
           onClick={() => setShowSpellbook(true)}
@@ -707,6 +872,32 @@ export default function QuestFlowPage() {
           <Tags size={16} />
           Tags
         </Link>
+        <button
+          type="button"
+          onClick={() => {
+            setShowSearchPanel((value) => {
+              const next = !value;
+              if (next) {
+                window.requestAnimationFrame(() => {
+                  searchInputRef.current?.focus();
+                  searchInputRef.current?.select();
+                });
+              }
+              return next;
+            });
+          }}
+          className={`focus-ring inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition active:scale-[0.97] ${
+            showSearchPanel || normalizedSearch
+              ? "border-slate-950 bg-slate-950 text-white"
+              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+          }`}
+          aria-expanded={showSearchPanel}
+          aria-controls="quest-search-panel"
+          aria-label="展开或收起搜索"
+        >
+          <Search size={16} />
+          搜索{normalizedSearch ? ` · ${visibleTasks.length}` : ""}
+        </button>
         {restState ? (
           <div className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
             {restState.type === "short" ? <Coffee size={16} /> : <Tent size={16} />}
@@ -750,6 +941,15 @@ export default function QuestFlowPage() {
           </>
         )}
         <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => setDarkMode((value) => !value)}
+          className="focus-ring inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.97] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+          aria-label={darkMode ? "切换到亮色主题" : "切换到暗色主题"}
+        >
+          {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+          {darkMode ? "亮色" : "暗色"}
+        </button>
         <Link
           href="/sync"
           className="focus-ring inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 active:scale-[0.97]"
@@ -759,22 +959,59 @@ export default function QuestFlowPage() {
         </Link>
       </div>
 
+      <AnimatePresence initial={false}>
+        {showSearchPanel ? (
+          <motion.section
+            id="quest-search-panel"
+            key="quest-search-panel"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="mb-3 overflow-hidden rounded-xl border border-slate-200 bg-white/85 p-3 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/85"
+            aria-label="搜索任务和日志"
+          >
+            <label className="sr-only" htmlFor="quest-search">搜索 QuestFlow</label>
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 dark:border-slate-700 dark:bg-slate-950/70">
+              <Search size={17} className="shrink-0 text-slate-500" />
+              <input
+                id="quest-search"
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="搜索标题 / 职业 / 事件类型 / 日期 / 日志（Ctrl+K）"
+                className="focus-ring min-h-11 w-full bg-transparent text-sm text-slate-950 placeholder:text-slate-400 dark:text-slate-100"
+                aria-label="搜索标题、职业、事件类型、日期和日志"
+              />
+              {searchQuery ? (
+                <button type="button" onClick={() => setSearchQuery("")} className="focus-ring rounded-md px-2 py-1 text-xs font-bold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800" aria-label="清空搜索">
+                  清空
+                </button>
+              ) : null}
+            </div>
+          </motion.section>
+        ) : null}
+      </AnimatePresence>
+
       {/* Create form */}
-      <div className="mb-5 rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="mb-5 rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <button
           type="button"
           onClick={() => setShowCreateForm((v) => !v)}
-          className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          className="focus-ring flex w-full items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:text-slate-100 dark:hover:bg-slate-800"
+          aria-expanded={showCreateForm}
+          aria-controls="create-quest-form"
         >
           <span className="flex items-center gap-2">
             <Plus size={16} />
-            新建任务
+            新建任务 <span className="text-xs font-bold text-slate-400">(Ctrl+N)</span>
           </span>
           {showCreateForm ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
         <AnimatePresence>
           {showCreateForm && (
             <motion.form
+              id="create-quest-form"
               onSubmit={submitTask}
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
@@ -788,6 +1025,7 @@ export default function QuestFlowPage() {
                   <Plus size={17} className="shrink-0 text-slate-500" />
                   <textarea
                     id="quest-title"
+                    ref={titleInputRef}
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     onKeyDown={(e) => {
@@ -796,7 +1034,7 @@ export default function QuestFlowPage() {
                         createQuest();
                       }
                     }}
-                    placeholder="新增 Quest，⌘+Enter 创建"
+                    placeholder="新增 Quest，Ctrl/⌘+Enter 创建"
                     rows={1}
                     className="focus-ring min-h-11 w-full resize-none overflow-hidden bg-transparent py-3 text-sm leading-5 text-slate-950 placeholder:text-slate-400"
                   />
@@ -810,11 +1048,12 @@ export default function QuestFlowPage() {
                         key={cn}
                         type="button"
                         onClick={() => setSelectedClass(cn)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        className={`focus-ring rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                           selectedClass === cn
                             ? classStyles[cn]
-                            : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                            : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                         }`}
+                        aria-pressed={selectedClass === cn}
                       >
                         {meta.emoji} {cn}（{meta.label}）
                       </button>
@@ -832,7 +1071,8 @@ export default function QuestFlowPage() {
                         key={tag}
                         type="button"
                         onClick={() => setSelectedTags((prev) => active ? prev.filter((t) => t !== tag) : [...prev, tag])}
-                        className="rounded-full border px-3 py-1.5 text-xs font-semibold transition"
+                        className="focus-ring rounded-full border px-3 py-1.5 text-xs font-semibold transition dark:border-slate-700 dark:text-slate-200"
+                        aria-pressed={active}
                         style={active ? {
                           color: meta.textColor,
                           backgroundColor: meta.bgColor,
@@ -889,11 +1129,12 @@ export default function QuestFlowPage() {
                     key={t.id}
                     type="button"
                     onClick={() => changeFocus(t.id)}
-                    className={`inline-flex max-w-[180px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-xs font-semibold transition active:scale-[0.95] ${
+                    className={`focus-ring inline-flex min-h-10 max-w-[180px] items-center gap-1.5 truncate rounded-full border px-2.5 py-1 text-xs font-semibold transition active:scale-[0.95] ${
                       isCurrent
                         ? "border-slate-950 bg-slate-950 text-white"
                         : "border-slate-200 bg-white hover:bg-slate-100 active:bg-slate-200"
-                    }`}
+                    }`                    }
+                    aria-label={`专注任务：${t.title}`}
                     style={
                       isCurrent
                         ? undefined
@@ -927,7 +1168,7 @@ export default function QuestFlowPage() {
                   </button>
                 ))}
               </div>
-              <span className="text-sm text-slate-500">{visibleTasks.length} quests</span>
+              <span className="text-sm text-slate-500">{visibleTasks.length} quests{normalizedSearch ? ` · ${visibleLogs.length} 条日志` : ""}</span>
             </div>
 
             {visibleTasks.length > 0 ? (
@@ -944,6 +1185,10 @@ export default function QuestFlowPage() {
                     onTagsChange={(tags) => updateTaskTags(task.id, tags)}
                   />
                 ))}
+              </div>
+            ) : normalizedSearch ? (
+              <div className="flex min-h-[180px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/70 p-6 text-center text-sm font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400">
+                没有找到匹配“{searchQuery.trim()}”的 {statusTabs.find((tab) => tab.id === statusFilter)?.label} 任务；可切换状态标签查看 Paused / Archived。
               </div>
             ) : (
               <EmptyState status={statusFilter} />
@@ -963,7 +1208,7 @@ export default function QuestFlowPage() {
             onToggle={completeFocusTodo}
             onReorder={reorderFocusTodo}
           />
-          <ProgressLogPanel logs={focusLogs} task={focusTask} />
+          <ProgressLogPanel logs={visibleLogs} task={normalizedSearch ? undefined : focusTask} title={normalizedSearch ? "搜索命中的日志" : undefined} subtitle={normalizedSearch ? `“${searchQuery.trim()}”` : undefined} />
         </aside>
       </div>
 
@@ -971,6 +1216,9 @@ export default function QuestFlowPage() {
       {showRestCompleteConfirm && (
         <motion.div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="休息完成确认"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -1018,9 +1266,9 @@ export default function QuestFlowPage() {
 
 function Metric({ label, value, children }: { label: string; value: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="text-xs font-medium text-slate-500">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-slate-950 sm:text-base">{value}</div>
+    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-slate-950 sm:text-base dark:text-slate-100">{value}</div>
       {children}
     </div>
   );
