@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -51,7 +52,6 @@ import {
 } from "@/data/feats";
 import type { ResonanceTrigger } from "@/data/resonance";
 import { SkillCheckToast, type SkillCheckInfo } from "@/components/SkillCheckToast";
-import { Spellbook } from "@/components/Spellbook";
 import { FocusPanel } from "@/components/FocusPanel";
 import { QuestCard } from "@/components/QuestCard";
 import { FocusTodoPanel } from "@/components/FocusTodoPanel";
@@ -61,10 +61,12 @@ import {
   QuestCreatedOverlay,
   MilestoneOverlay,
   NormalResonanceEffect,
-  NewResonanceModal,
   FeatChoiceModal,
-  LongRestSummaryModal,
 } from "@/components/Overlays";
+
+const Spellbook = dynamic(() => import("@/components/Spellbook").then((mod) => mod.Spellbook), { ssr: false });
+const NewResonanceModal = dynamic(() => import("@/components/Overlays").then((mod) => mod.NewResonanceModal), { ssr: false });
+const LongRestSummaryModal = dynamic(() => import("@/components/Overlays").then((mod) => mod.LongRestSummaryModal), { ssr: false });
 
 const statusTabs: Array<{ id: QuestStatus; label: string }> = [
   { id: "active", label: "Active" },
@@ -315,7 +317,6 @@ export default function QuestFlowPage() {
       return activityB - activityA;
     });
     return showAllClasses ? ordered : ordered.slice(0, 4);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [classStates, focusTask?.className, lastProgressClass, showAllClasses]);
 
   const createQuest = () => {

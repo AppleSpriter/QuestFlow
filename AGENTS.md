@@ -23,23 +23,30 @@ Core loop: push task → class XP → skill check → earn scrolls → learn/upg
 app/
   globals.css              -- Global styles, CSS variables, particle/glow animations
   layout.tsx               -- Root layout (lang="zh-CN"), favicon via /logo.png
-  page.tsx                 -- Main page UI, all animation queues, task CRUD, rest UI
+  page.tsx                 -- Main page shell, Zustand subscriptions, animation queues, task/rest orchestration
   api/webdav/              -- WebDAV proxy route handlers
   sync/page.tsx            -- Cloud sync configuration page
   resonance/page.tsx       -- Class resonance temple matrix / collection page
   build/page.tsx           -- Feat and automatic Build overview page
   tags/page.tsx            -- Reusable Progress tag management page
 lib/
-  quest-store.ts           -- Zustand store: all state, gamification logic, migrations
+  quest-store.ts           -- Zustand store: state actions, gamification logic, migrations
+  types.ts                 -- Shared QuestFlow store/import/export types
+  normalizers.ts           -- Strict normalization/type guards for imported and migrated data
   server/webdav-config.ts  -- Server-side WebDAV config resolution/local config file helpers
 data/
   classes.ts               -- Class definitions, skill lines, skill checks, fatigue, tags, tier system
   resonance.ts             -- 66 class resonance definitions, rewards, badges, levels, chain helpers
   feats.ts                 -- Feat definitions, quality/flow metadata, feat choice and Build helpers
 components/
-  SkillCheckToast.tsx      -- Skill check result toast (dice roll/success/failure/scroll/synergy)
-  ScrollReveal.tsx         -- Scroll opening animation (skill reveal/tier upgrade)
-  Spellbook.tsx            -- Spellbook modal (class list/skill lines/scroll use, with animation queue)
+  SkillCheckToast.tsx      -- Skill check result toast, portal-rendered into document.body
+  ScrollReveal.tsx         -- Scroll opening animation (skill reveal/tier upgrade), lazy-loaded by Spellbook
+  Spellbook.tsx            -- Spellbook modal (class list/skill lines/scroll use, with capped animation queue)
+  FocusPanel.tsx           -- Focused task panel and ProgressBurst animation queue
+  QuestCard.tsx            -- Task card, status actions and inline tag editing
+  FocusTodoPanel.tsx       -- Focused task Todo List with drag reorder
+  ProgressLogPanel.tsx     -- Recent progress/scroll log rendering
+  Overlays.tsx             -- Modal/overlay components for feats, resonance, rest and milestones
   TaskMapProgress.tsx      -- Quest map region progress bar
 electron/
   main.js                  -- Electron main process, packaged Next standalone server launcher
@@ -65,8 +72,8 @@ package.json               -- Scripts, npm package version, electron-builder con
 
 ## Data Persistence
 
-- All data in browser `localStorage`, key `"questflow-v1"`
-- Zustand `persist` middleware + `createJSONStorage(() => localStorage)`
+- All data in browser `localStorage`, key `"questflow-v1"`; import preflight snapshots the previous payload to `"questflow-v1.backup"`
+- Zustand `persist` middleware + guarded `createJSONStorage(localStorageProvider)` with near-quota size warnings
 - WebDAV sync available via `/api/webdav` proxy and `/sync` config page
 - WebDAV config is resolved server-side in `lib/server/webdav-config.ts`; do not store credentials in Zustand/browser state.
 - **Persist version: 15** (migration chain: v1 → v3 → v4 → v5 → v6 → v7 → v8 → v9 → v10 → v11 → v12 → v13 → v14 → v15)
@@ -101,7 +108,7 @@ type ClassState = {
   xp: number;
   scrolls: number;
   skills: OwnedSkill[];  // learned skill lines
-  fatigue: number;        // 0~100
+  fatigue: number;        // runtime 0~100; import normalization allows 0~120 for energy-manager compatibility
 }
 
 type QuestTask = {
@@ -113,7 +120,7 @@ type QuestTask = {
   tags: TaskTag[];          // "important" | "urgent" | "daily" | "weekly"
   todos: QuestTodoItem[];   // task-level checklist; completing one triggers progress
   recurringCompletedAt?: string;
-  recurringCompletedKey?: string; // local day key for daily, Monday week-start key for weekly
+  recurringCompletedKey?: string; // UTC day key for daily, UTC Monday week-start key for weekly
   createdAt: string;
   updatedAt: string;
   lastFocusedAt?: string;
@@ -193,7 +200,7 @@ type FeatState = {
 - `QUESTFLOW_BACKUP_VERSION` and `QUESTFLOW_COMPATIBILITY_VERSION` are both `15`.
 - `getBackupData()` returns a `QuestBackup` with `app: "questflow"`, version, exported/updated timestamps, tasks, logs, focus, streak, class states, sync fields, resonance collection, resonance buffs, resonance chain, and feat state.
 - `updatedAt` is derived from `dataUpdatedAt`, task `updatedAt`, and log `at` so WebDAV conflict checks can compare local vs remote freshness.
-- `importData()` normalizes tasks and class states before writing to Zustand; use it for local file import and WebDAV restore instead of manually assigning persisted data.
+- `importData()` validates future timestamps, snapshots current localStorage to `questflow-v1.backup`, and normalizes via strict type guards before writing; use it for local file import and WebDAV restore instead of manually assigning persisted data.
 - If the store schema changes, bump the persist/backup version together and add a migration path before changing sync or import behavior.
 
 ## Class System
@@ -272,8 +279,8 @@ Tasks can have tags: `important`, `urgent`, `daily`, `weekly` (or none). Existin
 | important | +3 XP | Blue (#1d4ed8) | Reward priority |
 | urgent | +2 XP | Red (#b91c1c) | Reward priority |
 | important + urgent | +5 XP | Purple | Combined reward priority |
-| daily | none | Green (#047857) | `completeRecurringTask()` archives until the next local day |
-| weekly | none | Orange (#7c2d12) | `completeRecurringTask()` archives until the next local Monday week key |
+| daily | none | Green (#047857) | `completeRecurringTask()` archives until the next UTC day key |
+| weekly | none | Orange (#7c2d12) | `completeRecurringTask()` archives until the next UTC Monday week key |
 
 `TAG_META` uses hex values with inline styles to avoid Tailwind dynamic class issues. `refreshRecurringTasks()` reactivates archived daily/weekly tasks whose completion key is no longer current.
 
@@ -281,7 +288,7 @@ Progress tags are user-configured labels for progress logs, managed on `/tags`. 
 
 ## Fatigue System
 
-Each class has independent fatigue (0~100). Each progress action adds +5 fatigue.
+Each class has independent runtime fatigue (0~100). Import normalization allows persisted values up to 120 so energy-manager feat over-cap data is not truncated. Each progress action adds +5 fatigue.
 
 | Fatigue | Stage | Emoji | Color | Reward Multiplier |
 |---------|-------|-------|-------|-------------------|
@@ -354,13 +361,13 @@ Scroll reward: skill-check success/critical + resonance immediate scroll + doubl
 
 All animations use refs-based queues to prevent overlap when users click rapidly:
 
-- **ProgressBurst** (`+1` burst): `progressQueueRef` → `enqueueProgress()`, 1200ms per item + 180ms gap
-- **SkillCheckToast** (dice roll result): `skillCheckQueueRef` → `enqueueSkillCheck()`, 3000ms per item + 180ms gap
+- **ProgressBurst** (`+1` burst): `progressQueueRef` → `enqueueProgress()`, max queued items 3, 1200ms per item + 180ms gap
+- **SkillCheckToast** (dice roll result): `skillCheckQueueRef` → `enqueueSkillCheck()`, max queued items 3, portal-rendered, 3000ms per item + 180ms gap
 - **NormalResonanceEffect**: lightweight 1s non-blocking right-side resonance animation
-- **NewResonanceModal**: 2~3s discovery modal for first-time resonance unlock
-- **ScrollReveal** (scroll opening): `scrollRevealQueueRef` (in Spellbook.tsx) → `enqueueScrollReveal()`, 2800ms per item + 180ms gap
+- **NewResonanceModal**: lazy-loaded 2~3s discovery modal for first-time resonance unlock
+- **ScrollReveal** (scroll opening): lazy-loaded by Spellbook, `scrollRevealQueueRef` → `enqueueScrollReveal()`, max queued items 3, 2800ms per item + 180ms gap
 
-Each queue: push to ref array → `playNext*()` checks `playingRef` flag → plays → setTimeout clears → next with gap.
+Each queue: silently drop when queue length is already 3, otherwise push to ref array → `playNext*()` checks `playingRef` flag → plays → setTimeout clears → next with gap.
 
 ## Component Tree
 

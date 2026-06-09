@@ -17,12 +17,15 @@ import {
   getNextTierCopies,
   getCopiesForTier
 } from "@/data/classes";
+import dynamic from "next/dynamic";
 import { useQuestStore } from "@/lib/quest-store";
-import { ScrollReveal, type ScrollRevealInfo } from "@/components/ScrollReveal";
+import type { ScrollRevealInfo } from "@/components/ScrollReveal";
+
+const ScrollReveal = dynamic(() => import("@/components/ScrollReveal").then((mod) => mod.ScrollReveal), { ssr: false });
 
 export function Spellbook({ onClose }: { onClose: () => void }) {
   const classStates = useQuestStore((s) => s.classStates);
-  const useScrollAction = useQuestStore((s) => s.useScroll);
+  const spendScroll = useQuestStore((s) => s.useScroll);
   const [selectedClass, setSelectedClass] = useState<ClassName>(ALL_CLASSES[0]);
   const [scrollReveal, setScrollReveal] = useState<ScrollRevealInfo | null>(null);
   const scrollRevealQueueRef = useRef<ScrollRevealInfo[]>([]);
@@ -50,7 +53,7 @@ export function Spellbook({ onClose }: { onClose: () => void }) {
   }, [playNextScrollReveal]);
 
   const handleUseScroll = (cn: ClassName) => {
-    const result = useScrollAction(cn);
+    const result = spendScroll(cn);
     if (!result) return;
     enqueueScrollReveal({
       className: cn,

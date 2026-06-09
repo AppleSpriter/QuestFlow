@@ -18,7 +18,7 @@ import {
   XCircle
 } from "lucide-react";
 import type { ChangeEvent, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QUESTFLOW_COMPATIBILITY_VERSION, type ProgressLog, type QuestBackup, type QuestTask, useQuestStore } from "@/lib/quest-store";
 import { ALL_CLASSES, CLASS_META, type ClassName } from "@/data/classes";
 
@@ -224,13 +224,12 @@ export default function SyncPage() {
       });
   }, []);
 
-  const refreshRemoteInfo = async () => {
+  const updateRemoteInfo = useCallback((remoteText: string | null) => {
+    if (!remoteText) {
+      setRemoteInfo(null);
+      return;
+    }
     try {
-      const remoteText = await downloadRemoteText();
-      if (!remoteText) {
-        setRemoteInfo(null);
-        return;
-      }
       const backup = parseBackup(remoteText);
       setRemoteInfo({
         tasks: backup.tasks.length,
@@ -247,13 +246,24 @@ export default function SyncPage() {
     } catch {
       setRemoteInfo(null);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    if (mounted && config.url) refreshRemoteInfo();
-  }, [mounted, config.url]);
+    if (!mounted || !config.url) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const result = await postWebDav<{ ok: boolean; missing?: boolean; data?: string }>({ action: "download" });
+        if (!cancelled) updateRemoteInfo(!result.missing && result.data ? result.data : null);
+      } catch {
+        if (!cancelled) setRemoteInfo(null);
+      }
+    };
+    refresh();
+    return () => { cancelled = true; };
+  }, [mounted, config.url, updateRemoteInfo]);
 
-  const localBackup = useMemo(() => (mounted ? getBackupData() : null), [mounted, getBackupData, tasks, logs, totalXp, dataUpdatedAt, lastSyncedAt]);
+  const localBackup = mounted ? getBackupData() : null;
   const localUpdatedAt = localBackup?.updatedAt;
   const processExportTasks = useMemo<ProcessExportTask[]>(() => {
     const stats = new Map<string, { logCount: number; lastLogAt?: string }>();
@@ -329,7 +339,7 @@ export default function SyncPage() {
       await postWebDav({ action: "upload", payload: snapshot });
       const syncedAt = new Date().toISOString();
       if (markAsSynced) markSynced(syncedAt);
-      refreshRemoteInfo();
+      updateRemoteInfo(await downloadRemoteText());
       showMessage({ type: "success", text: "本机存档已导出到 WebDAV。" });
       showReplacementNotice("已完成本机覆盖云端", "本机存档已上传到 WebDAV，云端存档已被本机数据替换。");
       return true;
@@ -386,7 +396,7 @@ export default function SyncPage() {
       parseBackup(remoteText);
       const syncedAt = new Date().toISOString();
       const ok = importData(remoteText, { markSyncedAt: syncedAt });
-      refreshRemoteInfo();
+      updateRemoteInfo(await downloadRemoteText());
       showMessage({
         type: ok ? "success" : "error",
         text: ok ? "已从 WebDAV 导入云端存档。" : "WebDAV 存档导入失败。"
@@ -438,7 +448,7 @@ export default function SyncPage() {
         }
         await postWebDav({ action: "upload", payload: local });
         markSynced(new Date().toISOString());
-        refreshRemoteInfo();
+        updateRemoteInfo(await downloadRemoteText());
         showMessage({ type: "success", text: "云端无存档，已上传本机存档作为初始云端版本。" });
         showReplacementNotice("已完成本机上传云端", "云端原本没有存档，已使用本机存档创建云端版本。");
         return;
@@ -455,7 +465,7 @@ export default function SyncPage() {
       if (localIsEmpty) {
         const syncedAt = new Date().toISOString();
         importData(remoteText, { markSyncedAt: syncedAt });
-        refreshRemoteInfo();
+        updateRemoteInfo(await downloadRemoteText());
         showMessage({ type: "success", text: "本机无数据，已从云端下载存档。" });
         showReplacementNotice("已完成云端覆盖本机", "本机原本没有存档，已使用 WebDAV 云端存档恢复本机数据。");
         return;
@@ -483,7 +493,7 @@ export default function SyncPage() {
           description: `云端存档（${formatDateTime(remoteUpdatedAt)}）较新，同步后将替换当前本机数据。`,
           onConfirm: () => {
             importData(remoteText, { markSyncedAt: new Date().toISOString() });
-            refreshRemoteInfo();
+            updateRemoteInfo(remoteText);
             showMessage({ type: "success", text: "云端较新，已下载并应用云端存档。" });
             showReplacementNotice("已完成云端覆盖本机", "云端存档较新，已替换当前本机存档。");
           }
@@ -499,7 +509,7 @@ export default function SyncPage() {
           onConfirm: async () => {
             await postWebDav({ action: "upload", payload: snapshot });
             markSynced(new Date().toISOString());
-            refreshRemoteInfo();
+            updateRemoteInfo(await downloadRemoteText());
             showMessage({ type: "success", text: "本机较新，已上传本机存档。" });
             showReplacementNotice("已完成本机覆盖云端", "本机存档较新，已替换 WebDAV 云端存档。");
           }

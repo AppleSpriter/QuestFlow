@@ -4,6 +4,34 @@ All notable changes to QuestFlow will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## v1.10 - 2026-06
+
+结构拆分、性能与数据安全更新：拆分主页/Store 巨型文件，降低动画阻塞与首屏负载，并加强导入和持久化边界保护。
+
+### Added
+
+- 新增严格 normalize type guard，导入/迁移外部输入时校验日志、技能检定、专长、标签与职业状态结构
+- 新增导入前本地快照：`importData()` 写入前将当前 `questflow-v1` 保存到 `questflow-v1.backup`
+- 新增 localStorage 体积监控，持久化载荷接近 4.5MB 时输出告警
+- 新增 ESLint flat config，并启用 `react-hooks/exhaustive-deps` 检查
+
+### Changed
+
+- 拆分 `page.tsx` 与 `quest-store.ts`：任务卡、专注面板、Todo、日志、Overlay、类型和 normalizer 独立维护
+- 首页改用 `useShallow` 合并 Zustand selectors，减少无关状态订阅造成的重渲染
+- `Spellbook`、`ScrollReveal`、`NewResonanceModal`、`LongRestSummaryModal` 改为动态加载，降低首屏同步加载压力
+- SkillCheck toast 改为 portal 渲染到 `document.body`，避免动画帧触发主页父级重渲染
+- Progress、SkillCheck、ScrollReveal 动画队列增加最大长度 3，连续点击时自动丢弃过量动画
+- 每日/每周任务 key、连续天数判断改用 UTC 日期，避免时区/DST 边界误判
+
+### Fixed
+
+- 修正 `refreshRecurringTasks()` 多触发源 30 秒内重复 set/persist 的问题
+- 修正长休后 `resonanceChain` 不重置导致跨休息连锁累积的问题
+- 修正导入未来时间戳存档的问题：超过本机时间 5 分钟会拒绝导入
+- 修正精力管理专长下历史存档疲劳 normalize 上限仍为 100 的问题，现在允许 0~120
+- 同步 AGENTS 文档中任务排序、persist 内容、疲劳上限和周期任务 UTC key 描述
+
 ## v1.9 - 2026-06
 
 任务推进体验与周期任务更新：围绕长期任务查找、推进记录、存档安全和每日/每周任务做增强。

@@ -118,11 +118,39 @@ export const PROGRESS_TAG_COLORS = {
 
 export const DEFAULT_PROGRESS_TAG_COLOR: ProgressTagColorId = "blue";
 
+const STORAGE_KEY = "questflow-v1";
+const STORAGE_BACKUP_KEY = "questflow-v1.backup";
+const LOCAL_STORAGE_WARN_BYTES = 4.5 * 1024 * 1024;
+
+const byteSize = (value: string) => new Blob([value]).size;
+
 const localStorageProvider = () => {
   if (typeof window === "undefined") {
     return { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
   }
-  return window.localStorage;
+  return {
+    getItem: (name: string) => window.localStorage.getItem(name),
+    setItem: (name: string, value: string) => {
+      const size = byteSize(value);
+      if (size > LOCAL_STORAGE_WARN_BYTES) {
+        console.warn(`[QuestFlow] localStorage payload is ${(size / 1024 / 1024).toFixed(2)}MB; export or prune logs soon.`);
+      }
+      try {
+        window.localStorage.setItem(name, value);
+      } catch (error) {
+        console.error("[QuestFlow] Failed to persist localStorage state.", error);
+        throw error;
+      }
+    },
+    removeItem: (name: string) => window.localStorage.removeItem(name),
+  };
+};
+
+const snapshotCurrentLocalState = () => {
+  if (typeof window === "undefined") return;
+  const current = window.localStorage.getItem(STORAGE_KEY);
+  if (!current) return;
+  window.localStorage.setItem(STORAGE_BACKUP_KEY, current);
 };
 
 const classNames: ClassName[] = ALL_CLASSES;
@@ -594,7 +622,9 @@ export const useQuestStore = create<QuestStore>()(
           const importedUpdatedAt = data.updatedAt ?? data.exportedAt ?? now;
           if (new Date(importedUpdatedAt).getTime() > nowTs + futureBuffer) return false;
           const tasks = normalizeTasks(data.tasks);
-          set({ tasks, logs: normalizeLogs(data.logs, tasks), focusTaskId: data.focusTaskId, totalXp: data.totalXp ?? 0, streak: data.streak ?? { count: 0 }, momentumTaskId: data.momentumTaskId, momentumCount: data.momentumCount ?? 0, classStates: normalizeClassStates(data.classStates), lastProgressDate: data.lastProgressDate, dataUpdatedAt: importedUpdatedAt, lastSyncedAt: options?.markSyncedAt ?? data.lastSyncedAt, lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined, discoveredResonances: data.discoveredResonances ?? {}, resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs(), resonanceChain: data.resonanceChain ?? { count: 0 }, featState: refreshPendingFeatChoices(normalizeClassStates(data.classStates), normalizeFeatState(data.featState), now), progressTags: normalizeProgressTags(data.progressTags) });
+          const classStates = normalizeClassStates(data.classStates);
+          snapshotCurrentLocalState();
+          set({ tasks, logs: normalizeLogs(data.logs, tasks), focusTaskId: typeof data.focusTaskId === "string" ? data.focusTaskId : undefined, totalXp: typeof data.totalXp === "number" ? data.totalXp : 0, streak: data.streak && typeof data.streak === "object" ? { count: Math.max(0, Math.floor(Number((data.streak as { count?: unknown }).count) || 0)), lastProgressDate: typeof (data.streak as { lastProgressDate?: unknown }).lastProgressDate === "string" ? (data.streak as { lastProgressDate: string }).lastProgressDate : undefined } : { count: 0 }, momentumTaskId: typeof data.momentumTaskId === "string" ? data.momentumTaskId : undefined, momentumCount: typeof data.momentumCount === "number" ? data.momentumCount : 0, classStates, lastProgressDate: typeof data.lastProgressDate === "string" ? data.lastProgressDate : undefined, dataUpdatedAt: importedUpdatedAt, lastSyncedAt: options?.markSyncedAt ?? (typeof data.lastSyncedAt === "string" ? data.lastSyncedAt : undefined), lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined, discoveredResonances: data.discoveredResonances && typeof data.discoveredResonances === "object" ? data.discoveredResonances as QuestStore["discoveredResonances"] : {}, resonanceBuffs: data.resonanceBuffs && typeof data.resonanceBuffs === "object" ? data.resonanceBuffs as ResonanceBuffs : createInitialResonanceBuffs(), resonanceChain: data.resonanceChain && typeof data.resonanceChain === "object" ? data.resonanceChain as ResonanceChainState : { count: 0 }, featState: refreshPendingFeatChoices(classStates, normalizeFeatState(data.featState), now), progressTags: normalizeProgressTags(data.progressTags) });
           return true;
         } catch { return false; }
       },
@@ -644,7 +674,7 @@ export const useQuestStore = create<QuestStore>()(
       markSynced: (syncedAt) => set({ lastSyncedAt: syncedAt }),
     }),
     {
-      name: "questflow-v1",
+      name: STORAGE_KEY,
       storage: createJSONStorage(localStorageProvider),
       version: QUESTFLOW_BACKUP_VERSION,
       migrate: (persistedState: unknown, version: number) => {
