@@ -12,13 +12,22 @@ let isQuitting = false;
 const isDev = !app.isPackaged;
 const devUrl = process.env.QUESTFLOW_DEV_URL || "http://localhost:3000";
 
-const findOpenPort = () =>
-  new Promise((resolve, reject) => {
+const findOpenPort = (preferredPort = 7654) =>
+  new Promise((resolve) => {
     const server = net.createServer();
 
     server.unref();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.on("error", () => {
+      // preferred port in use — let OS pick
+      const fallback = net.createServer();
+      fallback.unref();
+      fallback.listen(0, "127.0.0.1", () => {
+        const address = fallback.address();
+        const port = typeof address === "object" && address ? address.port : 0;
+        fallback.close(() => resolve(port));
+      });
+    });
+    server.listen(preferredPort, "127.0.0.1", () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : 0;
       server.close(() => resolve(port));

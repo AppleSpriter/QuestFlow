@@ -269,6 +269,19 @@ export default function QuestFlowPage() {
   useEffect(() => {
     setMounted(true);
     refreshRecurringTasks();
+
+    const interval = window.setInterval(refreshRecurringTasks, 60 * 1000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshRecurringTasks();
+    };
+    window.addEventListener("focus", refreshRecurringTasks);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshRecurringTasks);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [refreshRecurringTasks]);
 
   useEffect(() => () => {
