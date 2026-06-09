@@ -5,8 +5,6 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import {
   type ClassName,
   type ClassState,
-  type SkillCheckResult,
-  type OwnedSkill,
   type TaskTag,
   ALL_CLASSES,
   CLASS_META,
@@ -17,14 +15,11 @@ import {
   getLineById,
   getSkillNameAtTier,
   getTierFromCopies,
-  SKILL_LINES,
   SHORT_REST_RECOVERY
 } from "@/data/classes";
 import {
-  type DiscoveredResonance,
   type ResonanceBuffs,
   type ResonanceChainState,
-  type ResonanceRewardType,
   type ResonanceTrigger,
   RESONANCE_MAP,
   createInitialResonanceBuffs,
@@ -37,197 +32,202 @@ import {
   calculateProgressReward
 } from "@/lib/progress-rewards";
 import {
-  FEAT_DEFINITIONS,
   FEAT_MAP,
-  type FeatState,
-  type OwnedFeat,
-  type PendingFeatChoice,
   createInitialFeatState,
   refreshPendingFeatChoices,
   hasFeat
 } from "@/data/feats";
+import {
+  makeId,
+  isClassName,
+  isTaskTag,
+  isProgressTagColorId,
+  normalizeTasks,
+  normalizeTodos,
+  normalizeLogs,
+  normalizeProgressTags,
+  normalizeProgressTagSnapshots,
+  normalizeFeatState,
+  normalizeClassStates,
+} from "@/lib/normalizers";
+import type {
+  QuestStatus,
+  ProgressTagColorId,
+  ProgressTag,
+  ProgressTagSnapshot,
+  QuestTask,
+  QuestTodoItem,
+  ProgressLog,
+  ProgressResult,
+  StreakState,
+  RestState,
+  LongRestSummary,
+  QuestBackup,
+  ProgressTaskOptions,
+  RecurringTaskFrequency,
+} from "@/lib/types";
+
+// Re-export shared types
+export type {
+  QuestStatus,
+  ProgressLogType,
+  RecurringTaskFrequency,
+  ProgressTagColorId,
+  ProgressTagColorMeta,
+  ProgressTag,
+  ProgressTagSnapshot,
+  QuestTodoItem,
+  QuestTask,
+  ProgressLog,
+  ProgressResult,
+  StreakState,
+  RestState,
+  LongRestSummary,
+  QuestBackup,
+  ProgressTaskOptions,
+} from "@/lib/types";
+export {
+  makeId,
+  isClassName,
+  isTaskTag,
+  isProgressTagColorId,
+  normalizeTasks,
+  normalizeTodos,
+  normalizeLogs,
+  normalizeProgressTags,
+  normalizeProgressTagSnapshots,
+  normalizeFeatState,
+  normalizeClassStates,
+} from "@/lib/normalizers";
+
+export const PROGRESS_TAG_COLORS = {
+  blue: { id: "blue" as const, label: "星河蓝", textColor: "#1d4ed8", bgColor: "#dbeafe", borderColor: "#60a5fa" },
+  emerald: { id: "emerald" as const, label: "翡翠绿", textColor: "#047857", bgColor: "#d1fae5", borderColor: "#34d399" },
+  violet: { id: "violet" as const, label: "秘法紫", textColor: "#6d28d9", bgColor: "#ede9fe", borderColor: "#a78bfa" },
+  amber: { id: "amber" as const, label: "鎏金黄", textColor: "#b45309", bgColor: "#fef3c7", borderColor: "#f59e0b" },
+  rose: { id: "rose" as const, label: "蔷薇红", textColor: "#be123c", bgColor: "#ffe4e6", borderColor: "#fb7185" },
+  sky: { id: "sky" as const, label: "电光青", textColor: "#0369a1", bgColor: "#e0f2fe", borderColor: "#38bdf8" },
+  slate: { id: "slate" as const, label: "月影灰", textColor: "#475569", bgColor: "#f1f5f9", borderColor: "#94a3b8" },
+  fuchsia: { id: "fuchsia" as const, label: "霓虹粉紫", textColor: "#a21caf", bgColor: "#fae8ff", borderColor: "#e879f9" },
+  cyan: { id: "cyan" as const, label: "赛博青", textColor: "#0e7490", bgColor: "#cffafe", borderColor: "#22d3ee" },
+  lime: { id: "lime" as const, label: "荧光绿", textColor: "#4d7c0f", bgColor: "#ecfccb", borderColor: "#a3e635" },
+  orange: { id: "orange" as const, label: "熔岩橙", textColor: "#c2410c", bgColor: "#ffedd5", borderColor: "#fb923c" },
+  indigo: { id: "indigo" as const, label: "深空靛", textColor: "#4338ca", bgColor: "#e0e7ff", borderColor: "#818cf8" },
+  pink: { id: "pink" as const, label: "糖果粉", textColor: "#be185d", bgColor: "#fce7f3", borderColor: "#f472b6" }
+} as const satisfies Record<string, { id: string; label: string; textColor: string; bgColor: string; borderColor: string }>;
+
+export const DEFAULT_PROGRESS_TAG_COLOR: ProgressTagColorId = "blue";
 
 const localStorageProvider = () => {
   if (typeof window === "undefined") {
-    return {
-      getItem: () => null,
-      setItem: () => undefined,
-      removeItem: () => undefined
-    };
+    return { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
   }
   return window.localStorage;
 };
 
+const classNames: ClassName[] = ALL_CLASSES;
+export const QUESTFLOW_BACKUP_VERSION = 15;
+export const QUESTFLOW_COMPATIBILITY_VERSION = 15;
 
-export type QuestStatus = "active" | "paused" | "archived";
-export type ProgressLogType = "progress" | "scroll";
-export type RecurringTaskFrequency = "daily" | "weekly";
-export type ProgressTagColorId = "blue" | "emerald" | "violet" | "amber" | "rose" | "sky" | "slate" | "fuchsia" | "cyan" | "lime" | "orange" | "indigo" | "pink";
+// ─── Recurring helpers ───
 
-export type ProgressTagColorMeta = {
-  id: ProgressTagColorId;
-  label: string;
-  textColor: string;
-  bgColor: string;
-  borderColor: string;
+const getRecurringFrequency = (tags: TaskTag[]): RecurringTaskFrequency | undefined => {
+  if (tags.includes("daily")) return "daily";
+  if (tags.includes("weekly")) return "weekly";
+  return undefined;
 };
 
-export type ProgressTag = {
-  id: string;
-  name: string;
-  colorId: ProgressTagColorId;
-  createdAt: string;
-  updatedAt: string;
+const getLocalDayKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
-export type ProgressTagSnapshot = {
-  id: string;
-  name: string;
-  colorId: ProgressTagColorId;
+const getRecurringKey = (date: Date, frequency: RecurringTaskFrequency) => {
+  if (frequency === "daily") return getLocalDayKey(date);
+  const normalized = new Date(date);
+  normalized.setHours(0, 0, 0, 0);
+  const day = normalized.getDay() || 7;
+  normalized.setDate(normalized.getDate() - day + 1);
+  return getLocalDayKey(normalized);
 };
 
-export const PROGRESS_TAG_COLORS: Record<ProgressTagColorId, ProgressTagColorMeta> = {
-  blue: { id: "blue", label: "星河蓝", textColor: "#1d4ed8", bgColor: "#dbeafe", borderColor: "#60a5fa" },
-  emerald: { id: "emerald", label: "翡翠绿", textColor: "#047857", bgColor: "#d1fae5", borderColor: "#34d399" },
-  violet: { id: "violet", label: "秘法紫", textColor: "#6d28d9", bgColor: "#ede9fe", borderColor: "#a78bfa" },
-  amber: { id: "amber", label: "鎏金黄", textColor: "#b45309", bgColor: "#fef3c7", borderColor: "#f59e0b" },
-  rose: { id: "rose", label: "蔷薇红", textColor: "#be123c", bgColor: "#ffe4e6", borderColor: "#fb7185" },
-  sky: { id: "sky", label: "电光青", textColor: "#0369a1", bgColor: "#e0f2fe", borderColor: "#38bdf8" },
-  slate: { id: "slate", label: "月影灰", textColor: "#475569", bgColor: "#f1f5f9", borderColor: "#94a3b8" },
-  fuchsia: { id: "fuchsia", label: "霓虹粉紫", textColor: "#a21caf", bgColor: "#fae8ff", borderColor: "#e879f9" },
-  cyan: { id: "cyan", label: "赛博青", textColor: "#0e7490", bgColor: "#cffafe", borderColor: "#22d3ee" },
-  lime: { id: "lime", label: "荧光绿", textColor: "#4d7c0f", bgColor: "#ecfccb", borderColor: "#a3e635" },
-  orange: { id: "orange", label: "熔岩橙", textColor: "#c2410c", bgColor: "#ffedd5", borderColor: "#fb923c" },
-  indigo: { id: "indigo", label: "深空靛", textColor: "#4338ca", bgColor: "#e0e7ff", borderColor: "#818cf8" },
-  pink: { id: "pink", label: "糖果粉", textColor: "#be185d", bgColor: "#fce7f3", borderColor: "#f472b6" }
+const isPreviousDay = (lastDay: string, currentDay: string) => {
+  const last = new Date(`${lastDay}T00:00:00`);
+  const current = new Date(`${currentDay}T00:00:00`);
+  const diff = current.getTime() - last.getTime();
+  return diff > 0 && diff <= 36 * 60 * 60 * 1000;
 };
 
-export const DEFAULT_PROGRESS_TAG_COLOR: ProgressTagColorId = "blue";
-
-export type QuestTodoItem = {
-  id: string;
-  title: string;
-  completedAt?: string;
-  createdAt: string;
+const nextStreak = (streak: StreakState, now: Date): StreakState => {
+  const today = getLocalDayKey(now);
+  if (streak.lastProgressDate === today) return streak;
+  if (streak.lastProgressDate && isPreviousDay(streak.lastProgressDate, today)) {
+    return { count: streak.count + 1, lastProgressDate: today };
+  }
+  return { count: 1, lastProgressDate: today };
 };
 
-export type QuestTask = {
-  id: string;
-  title: string;
-  progressCount: number;
-  status: QuestStatus;
-  className: ClassName;
-  tags: TaskTag[];
-  todos: QuestTodoItem[];
-  recurringCompletedAt?: string;
-  recurringCompletedKey?: string;
-  createdAt: string;
-  updatedAt: string;
-  lastFocusedAt?: string;
+export const getLevelProgress = (xp: number) => {
+  const perLevel = 300;
+  const level = Math.floor(xp / perLevel) + 1;
+  const current = xp % perLevel;
+  return { level, current, required: perLevel, percent: Math.min(100, Math.round((current / perLevel) * 100)) };
 };
 
-export type ProgressLog = {
-  id: string;
-  type: ProgressLogType;
-  taskId: string;
-  className: ClassName;
-  note: string;
-  at: string;
-  xpAwarded: number;
-  classXpAwarded: number;
-  progressCount: number;
-  skillCheck?: SkillCheckResult;
-  scrollEarned?: string;
-  scrollCount?: number;
-  newSkill?: string;
-  skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
-  fatigueBefore?: number;
-  fatigueAfter?: number;
-  synergyBonus?: boolean;
-  resonanceKey?: string;
-  resonanceName?: string;
-  resonanceReward?: string;
-  todoId?: string;
-  todoTitle?: string;
-  progressTags?: ProgressTagSnapshot[];
+// ─── Resonance helpers ───
+
+const addResonanceReward = (
+  rewardType: string,
+  nextResonanceBuffs: ResonanceBuffs,
+  rewardBonuses: { xp: number; scrolls: number; fatigueRecovery: number }
+) => {
+  if (rewardType === "xp") rewardBonuses.xp += RESONANCE_XP_BONUS;
+  if (rewardType === "scroll") rewardBonuses.scrolls += 1;
+  if (rewardType === "fatigue") rewardBonuses.fatigueRecovery += RESONANCE_FATIGUE_RECOVERY;
+  if (rewardType === "advantage") nextResonanceBuffs.advantageChecks += 1;
+  if (rewardType === "lucky") nextResonanceBuffs.luckyChecks += 1;
+  if (rewardType === "doubleScroll") nextResonanceBuffs.doubleScrolls += 1;
+  if (rewardType === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
 };
 
-export type ProgressResult = {
-  taskId: string;
-  taskTitle: string;
-  className: ClassName;
-  progressCount: number;
-  xpAwarded: number;
-  classXpAwarded: number;
-  momentum: number;
-  milestone?: number;
-  newRegion?: string;
-  streak: number;
-  firstOfDay: boolean;
-  skillCheck?: SkillCheckResult;
-  scrollEarned?: string;
-  scrollCount?: number;
-  newSkill?: string;
-  skillUpgrade?: { name: string; fromTier: number; toTier: number; className: ClassName };
-  fatigueBefore?: number;
-  fatigueAfter?: number;
-  synergyBonus?: boolean;
-  resonance?: ResonanceTrigger;
-  at: string;
+// ─── Backup helpers ───
+
+const getDerivedUpdatedAt = (state: Pick<QuestStore, "dataUpdatedAt" | "tasks" | "logs">) => {
+  const candidates = [state.dataUpdatedAt, ...state.tasks.map((t) => t.updatedAt), ...state.logs.map((l) => l.at)].filter(Boolean) as string[];
+  return candidates.length > 0 ? candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] : undefined;
 };
 
-export type StreakState = {
-  count: number;
-  lastProgressDate?: string;
+const createBackupData = (state: QuestStore): QuestBackup => {
+  const exportedAt = new Date().toISOString();
+  return {
+    app: "questflow", version: QUESTFLOW_BACKUP_VERSION, exportedAt,
+    updatedAt: getDerivedUpdatedAt(state) ?? exportedAt,
+    tasks: state.tasks, logs: state.logs, focusTaskId: state.focusTaskId,
+    totalXp: state.totalXp, streak: state.streak, momentumTaskId: state.momentumTaskId,
+    momentumCount: state.momentumCount, classStates: state.classStates,
+    lastProgressDate: state.lastProgressDate, lastSyncedAt: state.lastSyncedAt,
+    lastProgressClass: state.lastProgressClass, discoveredResonances: state.discoveredResonances,
+    resonanceBuffs: state.resonanceBuffs, resonanceChain: state.resonanceChain,
+    featState: state.featState, progressTags: state.progressTags
+  };
 };
 
-export type RestState = {
-  type: "short" | "long";
-  startedAt: string;
-  endsAt: string;
+const downloadBackup = (data: QuestBackup) => {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `questflow-backup-v${QUESTFLOW_COMPATIBILITY_VERSION}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 };
 
-export type LongRestSummary = {
-  date: string;
-  classSummaries: Record<ClassName, {
-    progressCount: number;
-    xpGained: number;
-    scrollsEarned: number;
-    skillEvents: string[];
-  }>;
-  totalXp: number;
-  totalScrolls: number;
-  streak: number;
-};
-
-export type QuestBackup = {
-  app: "questflow";
-  version: number;
-  exportedAt: string;
-  updatedAt: string;
-  tasks: QuestTask[];
-  logs: ProgressLog[];
-  focusTaskId?: string;
-  totalXp: number;
-  streak: StreakState;
-  momentumTaskId?: string;
-  momentumCount: number;
-  classStates: Record<ClassName, ClassState>;
-  lastProgressDate?: string;
-  lastSyncedAt?: string;
-  lastProgressClass?: ClassName;
-  discoveredResonances?: Record<string, DiscoveredResonance>;
-  resonanceBuffs?: ResonanceBuffs;
-  resonanceChain?: ResonanceChainState;
-  featState?: FeatState;
-  progressTags?: ProgressTag[];
-};
-
-export type ProgressTaskOptions = {
-  note?: string;
-  todo?: QuestTodoItem;
-  progressTagIds?: string[];
-};
+// ─── Store type ───
 
 type QuestStore = {
   tasks: QuestTask[];
@@ -243,10 +243,10 @@ type QuestStore = {
   lastSyncedAt?: string;
   lastProgressClass?: ClassName;
   restState?: RestState;
-  discoveredResonances: Record<string, DiscoveredResonance>;
+  discoveredResonances: Record<string, { key: string; discoveredAt: string; triggerCount: number }>;
   resonanceBuffs: ResonanceBuffs;
   resonanceChain: ResonanceChainState;
-  featState: FeatState;
+  featState: import("@/data/feats").FeatState;
   progressTags: ProgressTag[];
   addTask: (title: string, className?: ClassName, tags?: TaskTag[]) => string | null;
   setFocusTask: (taskId: string) => void;
@@ -274,508 +274,74 @@ type QuestStore = {
   markSynced: (syncedAt: string) => void;
 };
 
-const classNames: ClassName[] = ALL_CLASSES;
-export const QUESTFLOW_BACKUP_VERSION = 15;
-export const QUESTFLOW_COMPATIBILITY_VERSION = 15;
-
-const getSkillLineIds = () => new Set(SKILL_LINES.map((line) => line.id));
-
-const addResonanceReward = (
-  rewardType: ResonanceRewardType,
-  nextResonanceBuffs: ResonanceBuffs,
-  rewardBonuses: { xp: number; scrolls: number; fatigueRecovery: number }
-) => {
-  if (rewardType === "xp") rewardBonuses.xp += RESONANCE_XP_BONUS;
-  if (rewardType === "scroll") rewardBonuses.scrolls += 1;
-  if (rewardType === "fatigue") rewardBonuses.fatigueRecovery += RESONANCE_FATIGUE_RECOVERY;
-  if (rewardType === "advantage") nextResonanceBuffs.advantageChecks += 1;
-  if (rewardType === "lucky") nextResonanceBuffs.luckyChecks += 1;
-  if (rewardType === "doubleScroll") nextResonanceBuffs.doubleScrolls += 1;
-  if (rewardType === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
-};
-
-const normalizeClassStates = (classStates: unknown): Record<ClassName, ClassState> => {
-  const initial = initClassState();
-  const source = classStates && typeof classStates === "object" ? classStates as Record<string, Partial<ClassState>> : {};
-  const lineIds = getSkillLineIds();
-
-  for (const cn of classNames) {
-    const item = source[cn];
-    if (!item) continue;
-    const skills = Array.isArray(item.skills)
-      ? item.skills
-        .filter((skill): skill is OwnedSkill => {
-          const candidate = skill as Partial<OwnedSkill>;
-          return typeof candidate.lineId === "string" && lineIds.has(candidate.lineId);
-        })
-        .map((skill) => {
-          const copies = Math.max(1, Math.floor(Number(skill.copies) || 1));
-          return {
-            lineId: skill.lineId,
-            copies,
-            currentTier: getTierFromCopies(copies)
-          };
-        })
-      : [];
-
-    initial[cn] = {
-      xp: Math.max(0, Math.floor(Number(item.xp) || 0)),
-      scrolls: Math.max(0, Math.floor(Number(item.scrolls) || 0)),
-      skills,
-      fatigue: Math.min(100, Math.max(0, Math.floor(Number(item.fatigue) || 0)))
-    };
-  }
-
-  return initial;
-};
-
-const isClassName = (value: unknown): value is ClassName =>
-  typeof value === "string" && classNames.includes(value as ClassName);
-
-const isTaskTag = (value: unknown): value is TaskTag =>
-  value === "important" || value === "urgent" || value === "daily" || value === "weekly";
-
-const getRecurringFrequency = (tags: TaskTag[]): RecurringTaskFrequency | undefined => {
-  if (tags.includes("daily")) return "daily";
-  if (tags.includes("weekly")) return "weekly";
-  return undefined;
-};
-
-const getRecurringKey = (date: Date, frequency: RecurringTaskFrequency) => {
-  if (frequency === "daily") return getLocalDayKey(date);
-  const normalized = new Date(date);
-  normalized.setHours(0, 0, 0, 0);
-  const day = normalized.getDay() || 7;
-  normalized.setDate(normalized.getDate() - day + 1);
-  return getLocalDayKey(normalized);
-};
-
-const isProgressTagColorId = (value: unknown): value is ProgressTagColorId =>
-  typeof value === "string" && value in PROGRESS_TAG_COLORS;
-
-const normalizeProgressTags = (tags: unknown): ProgressTag[] => {
-  if (!Array.isArray(tags)) return [];
-  const seen = new Set<string>();
-
-  return tags.reduce<ProgressTag[]>((items, tag) => {
-    const item = tag as Partial<ProgressTag>;
-    const name = typeof item.name === "string" ? item.name.trim() : "";
-    if (!name) return items;
-    const id = typeof item.id === "string" && item.id ? item.id : makeId();
-    if (seen.has(id)) return items;
-    seen.add(id);
-    const createdAt = typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString();
-    items.push({
-      id,
-      name,
-      colorId: isProgressTagColorId(item.colorId) ? item.colorId : DEFAULT_PROGRESS_TAG_COLOR,
-      createdAt,
-      updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : createdAt
-    });
-    return items;
-  }, []);
-};
-
-const normalizeProgressTagSnapshots = (tags: unknown): ProgressTagSnapshot[] => {
-  if (!Array.isArray(tags)) return [];
-  return tags.reduce<ProgressTagSnapshot[]>((items, tag) => {
-    const item = tag as Partial<ProgressTagSnapshot>;
-    const name = typeof item.name === "string" ? item.name.trim() : "";
-    if (!name || typeof item.id !== "string") return items;
-    items.push({
-      id: item.id,
-      name,
-      colorId: isProgressTagColorId(item.colorId) ? item.colorId : DEFAULT_PROGRESS_TAG_COLOR
-    });
-    return items;
-  }, []);
-};
-
-const normalizeFeatState = (featState: unknown): FeatState => {
-  const initial = createInitialFeatState();
-  if (!featState || typeof featState !== "object") return initial;
-
-  const source = featState as Partial<FeatState>;
-  const owned = Array.isArray(source.owned)
-    ? source.owned.reduce<OwnedFeat[]>((items, feat) => {
-        const item = feat as Partial<OwnedFeat>;
-        if (!item.id || !FEAT_MAP[item.id] || !isClassName(item.className)) return items;
-        items.push({
-          id: item.id,
-          className: item.className,
-          selectedAt: typeof item.selectedAt === "string" ? item.selectedAt : new Date().toISOString(),
-          level: Math.max(4, Math.floor(Number(item.level) || 4))
-        });
-        return items;
-      }, [])
-    : [];
-  const selectedIds = new Set(owned.map((feat) => feat.id));
-  const pending = Array.isArray(source.pending)
-    ? source.pending.reduce<PendingFeatChoice[]>((items, choice) => {
-        const item = choice as Partial<PendingFeatChoice>;
-        const choices = Array.isArray(item.choices)
-          ? item.choices.filter((id): id is string => typeof id === "string" && !!FEAT_MAP[id] && !selectedIds.has(id)).slice(0, 3)
-          : [];
-        if (!item.id || !isClassName(item.className) || choices.length === 0) return items;
-        items.push({
-          id: item.id,
-          className: item.className,
-          pointIndex: Math.max(1, Math.floor(Number(item.pointIndex) || 1)),
-          level: Math.max(4, Math.floor(Number(item.level) || 4)),
-          choices,
-          createdAt: typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString()
-        });
-        return items;
-      }, [])
-    : [];
-
-  return {
-    owned,
-    pending,
-    dailyAdvantageUsedAt: typeof source.dailyAdvantageUsedAt === "string" ? source.dailyAdvantageUsedAt : undefined,
-    shortRestCount: Math.max(0, Math.floor(Number(source.shortRestCount) || 0)),
-    longRestCount: Math.max(0, Math.floor(Number(source.longRestCount) || 0))
-  };
-};
-
-const makeId = () => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
-
-const normalizeTodos = (todos: unknown): QuestTodoItem[] => {
-  if (!Array.isArray(todos)) return [];
-
-  return todos.reduce<QuestTodoItem[]>((items, todo) => {
-    const item = todo as Partial<QuestTodoItem>;
-    const title = typeof item.title === "string" ? item.title.trim() : "";
-    if (!title) return items;
-
-    const createdAt = typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString();
-    const normalized: QuestTodoItem = {
-      id: typeof item.id === "string" ? item.id : makeId(),
-      title,
-      createdAt
-    };
-
-    if (typeof item.completedAt === "string") {
-      normalized.completedAt = item.completedAt;
-    }
-
-    items.push(normalized);
-    return items;
-  }, []);
-};
-
-const normalizeTasks = (tasks: unknown): QuestTask[] => {
-  if (!Array.isArray(tasks)) return [];
-
-  return tasks.map((task) => {
-    const item = task as Partial<QuestTask>;
-    const now = new Date().toISOString();
-    const createdAt = typeof item.createdAt === "string" ? item.createdAt : now;
-    const updatedAt =
-      typeof item.updatedAt === "string"
-        ? item.updatedAt
-        : typeof item.lastFocusedAt === "string"
-          ? item.lastFocusedAt
-          : createdAt;
-
-    const tags = Array.isArray(item.tags) ? item.tags.filter(isTaskTag) : [];
-
-    return {
-      id: typeof item.id === "string" ? item.id : makeId(),
-      title: typeof item.title === "string" ? item.title : "Untitled Quest",
-      progressCount: typeof item.progressCount === "number" ? item.progressCount : 0,
-      status: item.status === "paused" || item.status === "archived" ? item.status : "active",
-      className: isClassName(item.className) ? item.className : "Wizard",
-      tags,
-      todos: normalizeTodos(item.todos),
-      recurringCompletedAt: typeof item.recurringCompletedAt === "string" ? item.recurringCompletedAt : undefined,
-      recurringCompletedKey: typeof item.recurringCompletedKey === "string" ? item.recurringCompletedKey : undefined,
-      createdAt,
-      updatedAt,
-      lastFocusedAt: typeof item.lastFocusedAt === "string" ? item.lastFocusedAt : undefined
-    };
-  });
-};
-
-const inferLogClassName = (
-  log: Partial<ProgressLog>,
-  tasksById: Map<string, QuestTask>
-): ClassName => {
-  if (isClassName(log.className)) return log.className;
-  if (isClassName(log.skillCheck?.className)) return log.skillCheck.className;
-  if (log.skillUpgrade && isClassName(log.skillUpgrade.className)) return log.skillUpgrade.className;
-  const scrollClass = typeof log.scrollEarned === "string"
-    ? classNames.find((cn) => log.scrollEarned === CLASS_META[cn].scrollName)
-    : undefined;
-  if (scrollClass) return scrollClass;
-  if (typeof log.taskId === "string") {
-    const taskClass = tasksById.get(log.taskId)?.className;
-    if (isClassName(taskClass)) return taskClass;
-  }
-  return "Wizard";
-};
-
-const normalizeLogs = (logs: unknown, tasks: QuestTask[] = []): ProgressLog[] => {
-  if (!Array.isArray(logs)) return [];
-
-  const tasksById = new Map(tasks.map((task) => [task.id, task]));
-
-  return logs.map((log) => {
-    const item = log as Partial<ProgressLog>;
-    const at = typeof item.at === "string" ? item.at : new Date().toISOString();
-    const className = inferLogClassName(item, tasksById);
-    const type: ProgressLogType =
-      item.type === "scroll" || (item.taskId === "scroll" && (item.newSkill || item.skillUpgrade))
-        ? "scroll"
-        : "progress";
-
-    return {
-      id: typeof item.id === "string" ? item.id : makeId(),
-      type,
-      taskId: typeof item.taskId === "string" ? item.taskId : type,
-      className,
-      note: typeof item.note === "string" ? item.note : type === "scroll" ? "使用卷轴" : "推进一步",
-      at,
-      xpAwarded: Math.max(0, Math.floor(Number(item.xpAwarded) || 0)),
-      classXpAwarded: Math.max(0, Math.floor(Number(item.classXpAwarded) || 0)),
-      progressCount: Math.max(0, Math.floor(Number(item.progressCount) || 0)),
-      skillCheck: item.skillCheck,
-      scrollEarned: typeof item.scrollEarned === "string" ? item.scrollEarned : undefined,
-      scrollCount: typeof item.scrollCount === "number" ? item.scrollCount : undefined,
-      newSkill: typeof item.newSkill === "string" ? item.newSkill : undefined,
-      skillUpgrade: item.skillUpgrade,
-      fatigueBefore: typeof item.fatigueBefore === "number" ? item.fatigueBefore : undefined,
-      fatigueAfter: typeof item.fatigueAfter === "number" ? item.fatigueAfter : undefined,
-      synergyBonus: typeof item.synergyBonus === "boolean" ? item.synergyBonus : undefined,
-      resonanceKey: typeof item.resonanceKey === "string" ? item.resonanceKey : undefined,
-      resonanceName: typeof item.resonanceName === "string" ? item.resonanceName : undefined,
-      resonanceReward: typeof item.resonanceReward === "string" ? item.resonanceReward : undefined,
-      todoId: typeof item.todoId === "string" ? item.todoId : undefined,
-      todoTitle: typeof item.todoTitle === "string" ? item.todoTitle : undefined,
-      progressTags: normalizeProgressTagSnapshots(item.progressTags)
-    };
-  });
-};
-
-const getLocalDayKey = (date: Date) => {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const isPreviousDay = (lastDay: string, currentDay: string) => {
-  const last = new Date(`${lastDay}T00:00:00`);
-  const current = new Date(`${currentDay}T00:00:00`);
-  const diff = current.getTime() - last.getTime();
-  return diff > 0 && diff <= 36 * 60 * 60 * 1000;
-};
-
-const nextStreak = (streak: StreakState, now: Date): StreakState => {
-  const today = getLocalDayKey(now);
-  if (streak.lastProgressDate === today) return streak;
-  if (streak.lastProgressDate && isPreviousDay(streak.lastProgressDate, today)) {
-    return { count: streak.count + 1, lastProgressDate: today };
-  }
-  return { count: 1, lastProgressDate: today };
-};
-
-export const getLevelProgress = (xp: number) => {
-  const perLevel = 300;
-  const level = Math.floor(xp / perLevel) + 1;
-  const current = xp % perLevel;
-  return {
-    level,
-    current,
-    required: perLevel,
-    percent: Math.min(100, Math.round((current / perLevel) * 100))
-  };
-};
-
-const getDerivedUpdatedAt = (
-  state: Pick<QuestStore, "dataUpdatedAt" | "tasks" | "logs">
-) => {
-  const candidates = [
-    state.dataUpdatedAt,
-    ...state.tasks.map((task) => task.updatedAt),
-    ...state.logs.map((log) => log.at)
-  ].filter(Boolean) as string[];
-
-  if (candidates.length === 0) {
-    return undefined;
-  }
-
-  return candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
-};
-
-const createBackupData = (state: QuestStore): QuestBackup => {
-  const exportedAt = new Date().toISOString();
-
-  return {
-    app: "questflow",
-    version: QUESTFLOW_BACKUP_VERSION,
-    exportedAt,
-    updatedAt: getDerivedUpdatedAt(state) ?? exportedAt,
-    tasks: state.tasks,
-    logs: state.logs,
-    focusTaskId: state.focusTaskId,
-    totalXp: state.totalXp,
-    streak: state.streak,
-    momentumTaskId: state.momentumTaskId,
-    momentumCount: state.momentumCount,
-    classStates: state.classStates,
-    lastProgressDate: state.lastProgressDate,
-    lastSyncedAt: state.lastSyncedAt,
-    lastProgressClass: state.lastProgressClass,
-    discoveredResonances: state.discoveredResonances,
-    resonanceBuffs: state.resonanceBuffs,
-    resonanceChain: state.resonanceChain,
-    featState: state.featState,
-    progressTags: state.progressTags
-  };
-};
-
-const downloadBackup = (data: QuestBackup) => {
-  const json = JSON.stringify(data, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `questflow-backup-v${QUESTFLOW_COMPATIBILITY_VERSION}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-};
+// ─── Store ───
 
 export const useQuestStore = create<QuestStore>()(
   persist(
     (set, get) => ({
-      tasks: [],
-      logs: [],
-      focusTaskId: undefined,
-      totalXp: 0,
-      streak: { count: 0 },
-      momentumTaskId: undefined,
-      momentumCount: 0,
-      classStates: initClassState(),
-      lastProgressDate: undefined,
-      dataUpdatedAt: undefined,
-      lastSyncedAt: undefined,
-      lastProgressClass: undefined,
-      restState: undefined,
-      discoveredResonances: {},
-      resonanceBuffs: createInitialResonanceBuffs(),
-      resonanceChain: { count: 0 },
-      featState: createInitialFeatState(),
-      progressTags: [],
+      tasks: [], logs: [], focusTaskId: undefined, totalXp: 0, streak: { count: 0 },
+      momentumTaskId: undefined, momentumCount: 0, classStates: initClassState(),
+      lastProgressDate: undefined, dataUpdatedAt: undefined, lastSyncedAt: undefined,
+      lastProgressClass: undefined, restState: undefined, discoveredResonances: {},
+      resonanceBuffs: createInitialResonanceBuffs(), resonanceChain: { count: 0 },
+      featState: createInitialFeatState(), progressTags: [],
 
-      addTask: (rawTitle, className: ClassName = "Wizard", tags: TaskTag[] = []) => {
+      addTask: (rawTitle, className = "Wizard", tags = []) => {
         const title = rawTitle.trim();
         if (!title) return null;
-        const normalizedTags = tags.filter(isTaskTag).filter((tag, index, items) => items.indexOf(tag) === index);
+        const normalizedTags = tags.filter(isTaskTag).filter((tag, i, arr) => arr.indexOf(tag) === i);
         const now = new Date().toISOString();
-        const task: QuestTask = {
-          id: makeId(),
-          title,
-          progressCount: 0,
-          status: "active",
-          className,
-          tags: normalizedTags,
-          todos: [],
-          createdAt: now,
-          updatedAt: now,
-          lastFocusedAt: now
-        };
-        set((state) => ({
-          tasks: [task, ...state.tasks],
-          focusTaskId: state.focusTaskId ?? task.id,
-          dataUpdatedAt: now
-        }));
+        const task: QuestTask = { id: makeId(), title, progressCount: 0, status: "active", className, tags: normalizedTags, todos: [], createdAt: now, updatedAt: now, lastFocusedAt: now };
+        set((s) => ({ tasks: [task, ...s.tasks], focusTaskId: s.focusTaskId ?? task.id, dataUpdatedAt: now }));
         return task.id;
       },
 
       setFocusTask: (taskId) => {
         const now = new Date().toISOString();
-        set((state) => {
-          const selectedTask = state.tasks.find((task) => task.id === taskId);
-          if (!selectedTask) return state;
-          return {
-            focusTaskId: taskId,
-            dataUpdatedAt: now
-          };
-        });
+        set((s) => (s.tasks.find((t) => t.id === taskId) ? { focusTaskId: taskId, dataUpdatedAt: now } : s));
       },
 
       updateTaskStatus: (taskId, status) => {
         const now = new Date().toISOString();
-        set((state) => {
-          const nextTasks = state.tasks.map((task) =>
-            task.id === taskId ? { ...task, status, updatedAt: now } : task
-          );
-          const nextFocus =
-            state.focusTaskId === taskId && status === "archived"
-              ? nextTasks.find((task) => task.status === "active")?.id
-              : state.focusTaskId;
-          return { tasks: nextTasks, focusTaskId: nextFocus, dataUpdatedAt: now };
+        set((s) => {
+          const next = s.tasks.map((t) => t.id === taskId ? { ...t, status, updatedAt: now } : t);
+          const nextFocus = s.focusTaskId === taskId && status === "archived" ? next.find((t) => t.status === "active")?.id : s.focusTaskId;
+          return { tasks: next, focusTaskId: nextFocus, dataUpdatedAt: now };
         });
       },
 
       updateTaskTags: (taskId, tags) => {
         const now = new Date().toISOString();
-        const normalizedTags = tags.filter(isTaskTag).filter((tag, index, items) => items.indexOf(tag) === index);
+        const normalized = tags.filter(isTaskTag).filter((tag, i, arr) => arr.indexOf(tag) === i);
         let changed = false;
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.id !== taskId) return task;
+        set((s) => ({
+          tasks: s.tasks.map((t) => {
+            if (t.id !== taskId) return t;
             changed = true;
-            const frequency = getRecurringFrequency(normalizedTags);
-            const keepRecurringCompletion = frequency && getRecurringFrequency(task.tags) === frequency;
-            return {
-              ...task,
-              tags: normalizedTags,
-              recurringCompletedAt: keepRecurringCompletion ? task.recurringCompletedAt : undefined,
-              recurringCompletedKey: keepRecurringCompletion ? task.recurringCompletedKey : undefined,
-              updatedAt: now
-            };
+            const freq = getRecurringFrequency(normalized);
+            const keep = freq && getRecurringFrequency(t.tags) === freq;
+            return { ...t, tags: normalized, recurringCompletedAt: keep ? t.recurringCompletedAt : undefined, recurringCompletedKey: keep ? t.recurringCompletedKey : undefined, updatedAt: now };
           }),
-          dataUpdatedAt: changed ? now : state.dataUpdatedAt
+          dataUpdatedAt: changed ? now : s.dataUpdatedAt
         }));
       },
 
       completeRecurringTask: (taskId) => {
-        const state = get();
-        const task = state.tasks.find((item) => item.id === taskId);
+        const s = get();
+        const task = s.tasks.find((t) => t.id === taskId);
         if (!task || task.status === "archived") return null;
-        const frequency = getRecurringFrequency(task.tags);
-        if (!frequency) return null;
+        const freq = getRecurringFrequency(task.tags);
+        if (!freq) return null;
 
-        const result = get().progressTask(taskId, frequency === "daily" ? "完成今日" : "完成本周");
+        const result = get().progressTask(taskId, freq === "daily" ? "完成今日" : "完成本周");
         if (!result) return null;
 
         const completedAt = result.at;
-        const completedKey = getRecurringKey(new Date(completedAt), frequency);
-        const nextState = get();
-        const nextTasks = nextState.tasks.map((item) =>
-          item.id === taskId
-            ? {
-                ...item,
-                status: "archived" as QuestStatus,
-                recurringCompletedAt: completedAt,
-                recurringCompletedKey: completedKey,
-                updatedAt: completedAt
-              }
-            : item
-        );
-        const nextFocus = nextState.focusTaskId === taskId
-          ? nextTasks.find((item) => item.status === "active")?.id
-          : nextState.focusTaskId;
-        set({ tasks: nextTasks, focusTaskId: nextFocus, dataUpdatedAt: completedAt });
+        const completedKey = getRecurringKey(new Date(completedAt), freq);
+        const ns = get();
+        const next = ns.tasks.map((t) => t.id === taskId ? { ...t, status: "archived" as QuestStatus, recurringCompletedAt: completedAt, recurringCompletedKey: completedKey, updatedAt: completedAt } : t);
+        const nextFocus = ns.focusTaskId === taskId ? next.find((t) => t.status === "active")?.id : ns.focusTaskId;
+        set({ tasks: next, focusTaskId: nextFocus, dataUpdatedAt: completedAt });
         return result;
       },
 
@@ -783,22 +349,15 @@ export const useQuestStore = create<QuestStore>()(
         const nowDate = new Date();
         const now = nowDate.toISOString();
         let changed = false;
-        set((state) => {
-          const nextTasks = state.tasks.map((task) => {
-            const frequency = getRecurringFrequency(task.tags);
-            if (!frequency || task.status !== "archived") return task;
-            const currentKey = getRecurringKey(nowDate, frequency);
-            if (task.recurringCompletedKey === currentKey) return task;
+        set((s) => {
+          const next = s.tasks.map((t) => {
+            const freq = getRecurringFrequency(t.tags);
+            if (!freq || t.status !== "archived") return t;
+            if (t.recurringCompletedKey === getRecurringKey(nowDate, freq)) return t;
             changed = true;
-            return {
-              ...task,
-              status: "active" as QuestStatus,
-              recurringCompletedAt: undefined,
-              recurringCompletedKey: undefined,
-              updatedAt: now
-            };
+            return { ...t, status: "active" as QuestStatus, recurringCompletedAt: undefined, recurringCompletedKey: undefined, updatedAt: now };
           });
-          return changed ? { tasks: nextTasks, dataUpdatedAt: now } : state;
+          return changed ? { tasks: next, dataUpdatedAt: now } : s;
         });
       },
 
@@ -808,13 +367,9 @@ export const useQuestStore = create<QuestStore>()(
         const now = new Date().toISOString();
         const todo: QuestTodoItem = { id: makeId(), title, createdAt: now };
         let created = false;
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.id !== taskId) return task;
-            created = true;
-            return { ...task, todos: [todo, ...task.todos], updatedAt: now };
-          }),
-          dataUpdatedAt: created ? now : state.dataUpdatedAt
+        set((s) => ({
+          tasks: s.tasks.map((t) => { if (t.id !== taskId) return t; created = true; return { ...t, todos: [todo, ...t.todos], updatedAt: now }; }),
+          dataUpdatedAt: created ? now : s.dataUpdatedAt
         }));
         return created ? todo.id : null;
       },
@@ -823,61 +378,39 @@ export const useQuestStore = create<QuestStore>()(
         if (todoId === targetTodoId) return;
         const now = new Date().toISOString();
         let changed = false;
-        set((state) => ({
-          tasks: state.tasks.map((task) => {
-            if (task.id !== taskId) return task;
-            const fromIndex = task.todos.findIndex((todo) => todo.id === todoId);
-            const toIndex = task.todos.findIndex((todo) => todo.id === targetTodoId);
-            if (fromIndex < 0 || toIndex < 0) return task;
-            const nextTodos = [...task.todos];
-            const [movedTodo] = nextTodos.splice(fromIndex, 1);
-            nextTodos.splice(toIndex, 0, movedTodo);
-            changed = true;
-            return { ...task, todos: nextTodos, updatedAt: now };
+        set((s) => ({
+          tasks: s.tasks.map((t) => {
+            if (t.id !== taskId) return t;
+            const fi = t.todos.findIndex((td) => td.id === todoId);
+            const ti = t.todos.findIndex((td) => td.id === targetTodoId);
+            if (fi < 0 || ti < 0) return t;
+            const nt = [...t.todos]; const [mv] = nt.splice(fi, 1); nt.splice(ti, 0, mv);
+            changed = true; return { ...t, todos: nt, updatedAt: now };
           }),
-          dataUpdatedAt: changed ? now : state.dataUpdatedAt
+          dataUpdatedAt: changed ? now : s.dataUpdatedAt
         }));
       },
 
       toggleTaskTodo: (taskId, todoId) => {
-        const state = get();
-        const task = state.tasks.find((item) => item.id === taskId);
-        const todo = task?.todos.find((item) => item.id === todoId);
+        const s = get();
+        const task = s.tasks.find((t) => t.id === taskId);
+        const todo = task?.todos.find((t) => t.id === todoId);
         if (!task || !todo) return null;
-
-        if (!todo.completedAt) {
-          return get().progressTask(taskId, { note: todo.title, todo });
-        }
-
+        if (!todo.completedAt) return get().progressTask(taskId, { note: todo.title, todo });
         const now = new Date().toISOString();
-        set({
-          tasks: state.tasks.map((item) =>
-            item.id === taskId
-              ? {
-                  ...item,
-                  todos: item.todos.map((candidate) =>
-                    candidate.id === todoId ? { ...candidate, completedAt: undefined } : candidate
-                  ),
-                  updatedAt: now
-                }
-              : item
-          ),
-          dataUpdatedAt: now
-        });
+        set({ tasks: s.tasks.map((t) => t.id === taskId ? { ...t, todos: t.todos.map((c) => c.id === todoId ? { ...c, completedAt: undefined } : c), updatedAt: now } : t), dataUpdatedAt: now });
         return null;
       },
 
       progressTask: (taskId, options, legacyTodo) => {
-        const state = get();
-        const task = state.tasks.find((item) => item.id === taskId);
+        const s = get();
+        const task = s.tasks.find((t) => t.id === taskId);
         if (!task || task.status === "archived") return null;
-        const progressOptions: ProgressTaskOptions = typeof options === "string"
-          ? { note: options, todo: legacyTodo }
-          : options ?? {};
-        const selectedProgressTags = (progressOptions.progressTagIds ?? []).reduce<ProgressTagSnapshot[]>((items, tagId) => {
-          if (items.some((item) => item.id === tagId)) return items;
-          const tag = state.progressTags.find((item) => item.id === tagId);
-          if (tag) items.push({ id: tag.id, name: tag.name, colorId: tag.colorId });
+        const opts: ProgressTaskOptions = typeof options === "string" ? { note: options, todo: legacyTodo } : options ?? {};
+        const selectedTags = (opts.progressTagIds ?? []).reduce<ProgressTagSnapshot[]>((items, tid) => {
+          if (items.some((i) => i.id === tid)) return items;
+          const tg = s.progressTags.find((t) => t.id === tid);
+          if (tg) items.push({ id: tg.id, name: tg.name, colorId: tg.colorId });
           return items;
         }, []);
 
@@ -885,254 +418,115 @@ export const useQuestStore = create<QuestStore>()(
         const at = now.toISOString();
         const progressCount = task.progressCount + 1;
         const taskClassName = isClassName(task.className) ? task.className : "Wizard";
-        const fatigueBefore = state.classStates[taskClassName].fatigue;
+        const fatigueBefore = s.classStates[taskClassName].fatigue;
 
-        // Class resonance: switching class from last progress
-        const synergyActive = !!state.lastProgressClass && state.lastProgressClass !== taskClassName;
-        const resonanceDefinition = synergyActive && state.lastProgressClass
-          ? RESONANCE_MAP[getResonanceKey(state.lastProgressClass, taskClassName)]
-          : undefined;
-        const previousDiscovery = resonanceDefinition ? state.discoveredResonances[resonanceDefinition.key] : undefined;
-        const resonance: ResonanceTrigger | undefined = resonanceDefinition
-          ? {
-              key: resonanceDefinition.key,
-              name: resonanceDefinition.name,
-              classes: resonanceDefinition.classes,
-              reward: resonanceDefinition.reward,
-              description: resonanceDefinition.description,
-              discoveredAt: previousDiscovery?.discoveredAt ?? at,
-              triggerCount: (previousDiscovery?.triggerCount ?? 0) + 1,
-              level: getResonanceLevel((previousDiscovery?.triggerCount ?? 0) + 1),
-              previousLevel: getResonanceLevel(previousDiscovery?.triggerCount ?? 0),
-              leveledUp: getResonanceLevel((previousDiscovery?.triggerCount ?? 0) + 1) > getResonanceLevel(previousDiscovery?.triggerCount ?? 0),
-              chainCount: state.resonanceChain.lastClass && state.resonanceChain.lastClass !== taskClassName ? state.resonanceChain.count + 1 : 1,
-              chainBonus: state.resonanceChain.lastClass && state.resonanceChain.lastClass !== taskClassName ? state.resonanceChain.count + 1 >= 5 : false,
-              isNew: !previousDiscovery
-            }
-          : undefined;
+        const synergyActive = !!s.lastProgressClass && s.lastProgressClass !== taskClassName;
+        const resDef = synergyActive && s.lastProgressClass ? RESONANCE_MAP[getResonanceKey(s.lastProgressClass, taskClassName)] : undefined;
+        const prevDiscovery = resDef ? s.discoveredResonances[resDef.key] : undefined;
+        const resonance: ResonanceTrigger | undefined = resDef ? {
+          key: resDef.key, name: resDef.name, classes: resDef.classes, reward: resDef.reward, description: resDef.description,
+          discoveredAt: prevDiscovery?.discoveredAt ?? at, triggerCount: (prevDiscovery?.triggerCount ?? 0) + 1,
+          level: getResonanceLevel((prevDiscovery?.triggerCount ?? 0) + 1),
+          previousLevel: getResonanceLevel(prevDiscovery?.triggerCount ?? 0),
+          leveledUp: getResonanceLevel((prevDiscovery?.triggerCount ?? 0) + 1) > getResonanceLevel(prevDiscovery?.triggerCount ?? 0),
+          chainCount: s.resonanceChain.lastClass && s.resonanceChain.lastClass !== taskClassName ? s.resonanceChain.count + 1 : 1,
+          chainBonus: s.resonanceChain.lastClass && s.resonanceChain.lastClass !== taskClassName ? s.resonanceChain.count + 1 >= 5 : false,
+          isNew: !prevDiscovery
+        } : undefined;
 
-        const momentum =
-          state.momentumTaskId === taskId ? state.momentumCount + 1 : 1;
-        const nextResonanceBuffs = { ...state.resonanceBuffs };
-        const currentFeatState = refreshPendingFeatChoices(state.classStates, normalizeFeatState(state.featState), at);
+        const momentum = s.momentumTaskId === taskId ? s.momentumCount + 1 : 1;
+        const nextBuffs = { ...s.resonanceBuffs };
+        const currentFeatState = refreshPendingFeatChoices(s.classStates, normalizeFeatState(s.featState), at);
         const today = getLocalDayKey(now);
-        const dailyAdvantageAvailable = hasFeat(currentFeatState, "fate-dice", taskClassName) && currentFeatState.dailyAdvantageUsedAt !== today;
-        const existingDoubleScrollBuffs = nextResonanceBuffs.doubleScrolls;
-        const forceAdvantage = nextResonanceBuffs.advantageChecks > 0 || dailyAdvantageAvailable;
-        const criticalBonusChance =
-          (nextResonanceBuffs.luckyChecks > 0 ? 0.05 : 0) +
-          (hasFeat(currentFeatState, "lucky-one", taskClassName) ? 0.03 : 0);
+        const dailyAdv = hasFeat(currentFeatState, "fate-dice", taskClassName) && currentFeatState.dailyAdvantageUsedAt !== today;
+        const existingDouble = nextBuffs.doubleScrolls;
+        const forceAdv = nextBuffs.advantageChecks > 0 || dailyAdv;
+        const critChance = (nextBuffs.luckyChecks > 0 ? 0.05 : 0) + (hasFeat(currentFeatState, "lucky-one", taskClassName) ? 0.03 : 0);
 
-        // Skill check (50% chance)
-        let skillCheck: SkillCheckResult | undefined;
-        const triggerCheck = Math.random() < 0.5;
-        if (triggerCheck) {
-          const classLevel = getClassLevel(state.classStates[taskClassName].xp);
-          skillCheck = rollSkillCheck(taskClassName, classLevel, { forceAdvantage, criticalBonusChance });
-          if (hasFeat(currentFeatState, "chosen-one", taskClassName)) {
-            skillCheck = { ...skillCheck, modifier: skillCheck.modifier + 1, success: skillCheck.success || skillCheck.roll + skillCheck.modifier + 1 >= skillCheck.dc };
-          }
-          if (!skillCheck.success && hasFeat(currentFeatState, "favored-by-fate", taskClassName) && Math.random() < 0.1) {
-            skillCheck = rollSkillCheck(taskClassName, classLevel, { forceAdvantage, criticalBonusChance });
-          }
-          if (dailyAdvantageAvailable) currentFeatState.dailyAdvantageUsedAt = today;
-          if (nextResonanceBuffs.advantageChecks > 0) nextResonanceBuffs.advantageChecks = Math.max(0, nextResonanceBuffs.advantageChecks - 1);
-          if (nextResonanceBuffs.luckyChecks > 0) nextResonanceBuffs.luckyChecks = Math.max(0, nextResonanceBuffs.luckyChecks - 1);
+        let skillCheck;
+        if (Math.random() < 0.5) {
+          const cl = getClassLevel(s.classStates[taskClassName].xp);
+          skillCheck = rollSkillCheck(taskClassName, cl, { forceAdvantage: forceAdv, criticalBonusChance: critChance });
+          if (hasFeat(currentFeatState, "chosen-one", taskClassName)) skillCheck = { ...skillCheck, modifier: skillCheck.modifier + 1, success: skillCheck.success || skillCheck.roll + skillCheck.modifier + 1 >= skillCheck.dc };
+          if (!skillCheck.success && hasFeat(currentFeatState, "favored-by-fate", taskClassName) && Math.random() < 0.1) skillCheck = rollSkillCheck(taskClassName, cl, { forceAdvantage: forceAdv, criticalBonusChance: critChance });
+          if (dailyAdv) currentFeatState.dailyAdvantageUsedAt = today;
+          if (nextBuffs.advantageChecks > 0) nextBuffs.advantageChecks = Math.max(0, nextBuffs.advantageChecks - 1);
+          if (nextBuffs.luckyChecks > 0) nextBuffs.luckyChecks = Math.max(0, nextBuffs.luckyChecks - 1);
         }
 
         const fatigueLimit = hasFeat(currentFeatState, "energy-manager", taskClassName) ? 120 : 100;
-        const reward = calculateProgressReward({
-          previousProgressCount: task.progressCount,
-          progressCount,
-          tags: task.tags ?? [],
-          fatigueBefore,
-          momentum,
-          resonanceRewardType: resonance?.reward.type,
-          resonanceChainBonus: resonance?.chainBonus,
-          skillCheck,
-          doubleScrollBuffs: existingDoubleScrollBuffs,
-          fatigueMultiplierOverride: hasFeat(currentFeatState, "iron-will", taskClassName) && fatigueBefore > 80 ? 1 : undefined,
-          fatigueLimit
-        });
-        if (reward.consumedDoubleScroll) {
-          nextResonanceBuffs.doubleScrolls = Math.max(0, nextResonanceBuffs.doubleScrolls - 1);
-        }
+        const reward = calculateProgressReward({ previousProgressCount: task.progressCount, progressCount, tags: task.tags ?? [], fatigueBefore, momentum, resonanceRewardType: resonance?.reward.type, resonanceChainBonus: resonance?.chainBonus, skillCheck, doubleScrollBuffs: existingDouble, fatigueMultiplierOverride: hasFeat(currentFeatState, "iron-will", taskClassName) && fatigueBefore > 80 ? 1 : undefined, fatigueLimit });
+        if (reward.consumedDoubleScroll) nextBuffs.doubleScrolls = Math.max(0, nextBuffs.doubleScrolls - 1);
 
-        const resonanceBonuses = { xp: 0, scrolls: 0, fatigueRecovery: 0 };
-        if (resonance?.reward.type === "advantage") nextResonanceBuffs.advantageChecks += 1;
-        if (resonance?.reward.type === "lucky") nextResonanceBuffs.luckyChecks += 1;
-        if (resonance?.reward.type === "doubleScroll") nextResonanceBuffs.doubleScrolls += 1;
-        if (resonance?.reward.type === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
-        if (resonance && hasFeat(currentFeatState, "resonance-core", taskClassName)) {
-          addResonanceReward(resonance.reward.type, nextResonanceBuffs, resonanceBonuses);
-        }
-        if (resonance && hasFeat(currentFeatState, "linkage-expert", taskClassName) && Math.random() < 0.1) {
-          addResonanceReward(resonance.reward.type, nextResonanceBuffs, resonanceBonuses);
-        }
-        if (resonanceBonuses.fatigueRecovery > 0) {
-          reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - resonanceBonuses.fatigueRecovery);
-        }
-        if (hasFeat(currentFeatState, "perpetual-motion", taskClassName)) {
-          reward.fatigueAfterProgress = Math.min(80, reward.fatigueAfterProgress);
-          reward.finalFatigueAfter = Math.min(80, reward.finalFatigueAfter);
-        }
+        const rBonuses = { xp: 0, scrolls: 0, fatigueRecovery: 0 };
+        if (resonance?.reward.type === "advantage") nextBuffs.advantageChecks += 1;
+        if (resonance?.reward.type === "lucky") nextBuffs.luckyChecks += 1;
+        if (resonance?.reward.type === "doubleScroll") nextBuffs.doubleScrolls += 1;
+        if (resonance?.reward.type === "longRestScroll") nextBuffs.longRestScrolls += 1;
+        if (resonance && hasFeat(currentFeatState, "resonance-core", taskClassName)) addResonanceReward(resonance.reward.type, nextBuffs, rBonuses);
+        if (resonance && hasFeat(currentFeatState, "linkage-expert", taskClassName) && Math.random() < 0.1) addResonanceReward(resonance.reward.type, nextBuffs, rBonuses);
+        if (rBonuses.fatigueRecovery > 0) reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - rBonuses.fatigueRecovery);
+        if (hasFeat(currentFeatState, "perpetual-motion", taskClassName)) { reward.fatigueAfterProgress = Math.min(80, reward.fatigueAfterProgress); reward.finalFatigueAfter = Math.min(80, reward.finalFatigueAfter); }
 
-        let featBonusXp = resonanceBonuses.xp;
-        let featClassXpBonus = 0;
-        let featScrollBonus = resonanceBonuses.scrolls;
-        if (hasFeat(currentFeatState, "diligent-scholar", taskClassName)) featBonusXp += 1;
-        if (hasFeat(currentFeatState, "diligent-scholar", taskClassName)) featClassXpBonus += 1;
-        if (hasFeat(currentFeatState, "deep-thinking", taskClassName) && task.tags.includes("important")) featBonusXp += 2;
-        if (hasFeat(currentFeatState, "specialist", taskClassName) && momentum >= 3) featBonusXp += 3;
-        if (hasFeat(currentFeatState, "target-lock", taskClassName) && momentum >= 2) featBonusXp += Math.min(10, momentum - 1);
-        if (hasFeat(currentFeatState, "class-switcher", taskClassName) && synergyActive) featBonusXp += 3;
-        if (hasFeat(currentFeatState, "rapid-learning", taskClassName) && task.progressCount < 10) featClassXpBonus += Math.round(reward.classXpAwarded * 0.5);
-        if (hasFeat(currentFeatState, "school-master", taskClassName) && getClassLevel(state.classStates[taskClassName].xp) >= 20) featClassXpBonus += Math.round(reward.classXpAwarded * 0.2);
-        if (hasFeat(currentFeatState, "grand-library", taskClassName)) featClassXpBonus += Math.max(1, Math.round(reward.classXpAwarded * 0.1));
-        if (hasFeat(currentFeatState, "eidetic-memory", taskClassName) && skillCheck?.scrollEarned && Math.random() < 0.1) featScrollBonus += 1;
-        if (hasFeat(currentFeatState, "golden-hand", taskClassName) && reward.scrollsAwarded > 0 && Math.random() < 0.1) featScrollBonus += 1;
-        if (hasFeat(currentFeatState, "fate-weaver", taskClassName) && skillCheck?.critical) {
-          featClassXpBonus += skillCheck.xpBonus;
-          featScrollBonus += skillCheck.scrollCount;
-        }
-        if (hasFeat(currentFeatState, "long-hauler", taskClassName) && task.tags.includes("important")) featScrollBonus += 1;
-        if (hasFeat(currentFeatState, "legendary-crafter", taskClassName) && momentum >= 10) featScrollBonus += 1;
-        if (hasFeat(currentFeatState, "resonance-master", taskClassName) && resonance?.isNew) featScrollBonus += hasFeat(currentFeatState, "omnicollector", taskClassName) ? 2 : 1;
-        if (hasFeat(currentFeatState, "archaeologist", taskClassName) && reward.newRegion) featScrollBonus += hasFeat(currentFeatState, "omnicollector", taskClassName) ? 2 : 1;
-        if (resonance && hasFeat(currentFeatState, "social-adept", taskClassName)) featBonusXp += 1;
-        if (hasFeat(currentFeatState, "self-recovery", taskClassName) && state.lastProgressDate !== today) {
-          reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - 5);
-        }
-        if (synergyActive && hasFeat(currentFeatState, "party-coordinator", taskClassName)) {
-          reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - 5);
-        }
-        if (hasFeat(currentFeatState, "deep-work", taskClassName) && state.focusTaskId === taskId) {
-          reward.finalFatigueAfter = Math.max(fatigueBefore, reward.finalFatigueAfter - 2);
-        }
+        let featXp = rBonuses.xp, featClassXp = 0, featScrolls = rBonuses.scrolls;
+        if (hasFeat(currentFeatState, "diligent-scholar", taskClassName)) { featXp += 1; featClassXp += 1; }
+        if (hasFeat(currentFeatState, "deep-thinking", taskClassName) && task.tags.includes("important")) featXp += 2;
+        if (hasFeat(currentFeatState, "specialist", taskClassName) && momentum >= 3) featXp += 3;
+        if (hasFeat(currentFeatState, "target-lock", taskClassName) && momentum >= 2) featXp += Math.min(10, momentum - 1);
+        if (hasFeat(currentFeatState, "class-switcher", taskClassName) && synergyActive) featXp += 3;
+        if (hasFeat(currentFeatState, "rapid-learning", taskClassName) && task.progressCount < 10) featClassXp += Math.round(reward.classXpAwarded * 0.5);
+        if (hasFeat(currentFeatState, "school-master", taskClassName) && getClassLevel(s.classStates[taskClassName].xp) >= 20) featClassXp += Math.round(reward.classXpAwarded * 0.2);
+        if (hasFeat(currentFeatState, "grand-library", taskClassName)) featClassXp += Math.max(1, Math.round(reward.classXpAwarded * 0.1));
+        if (hasFeat(currentFeatState, "eidetic-memory", taskClassName) && skillCheck?.scrollEarned && Math.random() < 0.1) featScrolls += 1;
+        if (hasFeat(currentFeatState, "golden-hand", taskClassName) && reward.scrollsAwarded > 0 && Math.random() < 0.1) featScrolls += 1;
+        if (hasFeat(currentFeatState, "fate-weaver", taskClassName) && skillCheck?.critical) { featClassXp += skillCheck.xpBonus; featScrolls += skillCheck.scrollCount; }
+        if (hasFeat(currentFeatState, "long-hauler", taskClassName) && task.tags.includes("important")) featScrolls += 1;
+        if (hasFeat(currentFeatState, "legendary-crafter", taskClassName) && momentum >= 10) featScrolls += 1;
+        if (hasFeat(currentFeatState, "resonance-master", taskClassName) && resonance?.isNew) featScrolls += hasFeat(currentFeatState, "omnicollector", taskClassName) ? 2 : 1;
+        if (hasFeat(currentFeatState, "archaeologist", taskClassName) && reward.newRegion) featScrolls += hasFeat(currentFeatState, "omnicollector", taskClassName) ? 2 : 1;
+        if (resonance && hasFeat(currentFeatState, "social-adept", taskClassName)) featXp += 1;
+        if (hasFeat(currentFeatState, "self-recovery", taskClassName) && s.lastProgressDate !== today) reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - 5);
+        if (synergyActive && hasFeat(currentFeatState, "party-coordinator", taskClassName)) reward.finalFatigueAfter = Math.max(0, reward.finalFatigueAfter - 5);
+        if (hasFeat(currentFeatState, "deep-work", taskClassName) && s.focusTaskId === taskId) reward.finalFatigueAfter = Math.max(fatigueBefore, reward.finalFatigueAfter - 2);
         reward.finalFatigueAfter = Math.min(fatigueLimit, reward.finalFatigueAfter);
 
-        const totalBaseXp = reward.baseXp + featBonusXp;
-        const totalClassXpAwarded = reward.classXpAwarded + featClassXpBonus;
-        const totalScrollsAwarded = reward.scrollsAwarded + featScrollBonus;
-        const nextStreakState = nextStreak(state.streak, now);
-        const firstOfDay = state.lastProgressDate !== today;
-        const completedTodo = progressOptions.todo;
-        const note = progressOptions.note?.trim() || selectedProgressTags.map((tag) => tag.name).join(" · ") || "推进一步";
+        const totalBaseXp = reward.baseXp + featXp;
+        const totalClassXp = reward.classXpAwarded + featClassXp;
+        const totalScrolls = reward.scrollsAwarded + featScrolls;
+        const nextStreakSt = nextStreak(s.streak, now);
+        const firstOfDay = s.lastProgressDate !== today;
+        const completedTodo = opts.todo;
+        const note = opts.note?.trim() || selectedTags.map((tg) => tg.name).join(" · ") || "推进一步";
 
         const log: ProgressLog = {
-          id: makeId(),
-          type: "progress",
-          taskId,
-          className: taskClassName,
-          note,
-          at,
-          xpAwarded: totalBaseXp,
-          classXpAwarded: totalClassXpAwarded,
-          progressCount,
-          skillCheck,
-          scrollEarned: totalScrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label ?? CLASS_META[taskClassName].scrollName) : undefined,
-          scrollCount: totalScrollsAwarded > 0 ? totalScrollsAwarded : undefined,
-          fatigueBefore,
-          fatigueAfter: reward.finalFatigueAfter,
-          synergyBonus: synergyActive,
-          resonanceKey: resonance?.key,
-          resonanceName: resonance?.name,
-          resonanceReward: resonance?.reward.label,
-          todoId: completedTodo?.id,
-          todoTitle: completedTodo?.title,
-          progressTags: selectedProgressTags
+          id: makeId(), type: "progress", taskId, className: taskClassName, note, at,
+          xpAwarded: totalBaseXp, classXpAwarded: totalClassXp, progressCount, skillCheck,
+          scrollEarned: totalScrolls > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label ?? CLASS_META[taskClassName].scrollName) : undefined,
+          scrollCount: totalScrolls > 0 ? totalScrolls : undefined,
+          fatigueBefore, fatigueAfter: reward.finalFatigueAfter, synergyBonus: synergyActive,
+          resonanceKey: resonance?.key, resonanceName: resonance?.name, resonanceReward: resonance?.reward.label,
+          todoId: completedTodo?.id, todoTitle: completedTodo?.title, progressTags: selectedTags
         };
 
-        const updatedClassStates = { ...state.classStates };
-        updatedClassStates[taskClassName] = {
-          ...updatedClassStates[taskClassName],
-          xp: updatedClassStates[taskClassName].xp + totalClassXpAwarded,
-          scrolls: updatedClassStates[taskClassName].scrolls + totalScrollsAwarded,
-          fatigue: reward.finalFatigueAfter
-        };
+        const updatedClassStates = { ...s.classStates };
+        updatedClassStates[taskClassName] = { ...updatedClassStates[taskClassName], xp: updatedClassStates[taskClassName].xp + totalClassXp, scrolls: updatedClassStates[taskClassName].scrolls + totalScrolls, fatigue: reward.finalFatigueAfter };
         const nextFeatState = refreshPendingFeatChoices(updatedClassStates, currentFeatState, at);
 
-        const updatedDiscoveries = resonance
-          ? {
-              ...state.discoveredResonances,
-              [resonance.key]: {
-                key: resonance.key,
-                discoveredAt: resonance.discoveredAt,
-                triggerCount: resonance.triggerCount
-              }
-            }
-          : state.discoveredResonances;
+        const updatedDiscoveries = resonance ? { ...s.discoveredResonances, [resonance.key]: { key: resonance.key, discoveredAt: resonance.discoveredAt, triggerCount: resonance.triggerCount } } : s.discoveredResonances;
 
-        const updatedTask: QuestTask = {
-          ...task,
-          className: taskClassName,
-          status: task.status === "paused" ? "active" : task.status,
-          progressCount,
-          todos: completedTodo
-            ? task.todos.map((todo) =>
-                todo.id === completedTodo.id ? { ...todo, completedAt: at } : todo
-              )
-            : task.todos,
-          updatedAt: at,
-          lastFocusedAt: at
-        };
+        const updatedTask: QuestTask = { ...task, className: taskClassName, status: task.status === "paused" ? "active" : task.status, progressCount, todos: completedTodo ? task.todos.map((td) => td.id === completedTodo.id ? { ...td, completedAt: at } : td) : task.todos, updatedAt: at, lastFocusedAt: at };
 
-        set({
-          tasks: [...state.tasks.filter((item) => item.id !== taskId), updatedTask],
-          logs: [log, ...state.logs],
-          focusTaskId: taskId,
-          totalXp: state.totalXp + totalBaseXp,
-          streak: nextStreakState,
-          momentumTaskId: taskId,
-          momentumCount: momentum,
-          classStates: updatedClassStates,
-          lastProgressDate: firstOfDay ? today : state.lastProgressDate,
-          lastProgressClass: taskClassName,
-          discoveredResonances: updatedDiscoveries,
-          resonanceBuffs: nextResonanceBuffs,
-          resonanceChain: { count: resonance?.chainCount ?? 0, lastClass: taskClassName },
-          featState: nextFeatState,
-          dataUpdatedAt: at
-        });
+        set({ tasks: [...s.tasks.filter((t) => t.id !== taskId), updatedTask], logs: [log, ...s.logs], focusTaskId: taskId, totalXp: s.totalXp + totalBaseXp, streak: nextStreakSt, momentumTaskId: taskId, momentumCount: momentum, classStates: updatedClassStates, lastProgressDate: firstOfDay ? today : s.lastProgressDate, lastProgressClass: taskClassName, discoveredResonances: updatedDiscoveries, resonanceBuffs: nextBuffs, resonanceChain: { count: resonance?.chainCount ?? 0, lastClass: taskClassName }, featState: nextFeatState, dataUpdatedAt: at });
 
-        return {
-          taskId,
-          taskTitle: task.title,
-          className: taskClassName,
-          progressCount,
-          xpAwarded: totalBaseXp,
-          classXpAwarded: totalClassXpAwarded,
-          momentum,
-          milestone: reward.milestone,
-          newRegion: reward.newRegion,
-          streak: nextStreakState.count,
-          firstOfDay,
-          skillCheck,
-          scrollEarned: totalScrollsAwarded > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label ?? CLASS_META[taskClassName].scrollName) : undefined,
-          scrollCount: totalScrollsAwarded > 0 ? totalScrollsAwarded : undefined,
-          fatigueBefore,
-          fatigueAfter: reward.finalFatigueAfter,
-          synergyBonus: synergyActive,
-          resonance,
-          at
-        };
+        return { taskId, taskTitle: task.title, className: taskClassName, progressCount, xpAwarded: totalBaseXp, classXpAwarded: totalClassXp, momentum, milestone: reward.milestone, newRegion: reward.newRegion, streak: nextStreakSt.count, firstOfDay, skillCheck, scrollEarned: totalScrolls > 0 ? (skillCheck?.scrollType ?? resonance?.reward.label ?? CLASS_META[taskClassName].scrollName) : undefined, scrollCount: totalScrolls > 0 ? totalScrolls : undefined, fatigueBefore, fatigueAfter: reward.finalFatigueAfter, synergyBonus: synergyActive, resonance, at };
       },
 
       addProgressTag: (rawName, colorId = DEFAULT_PROGRESS_TAG_COLOR) => {
         const name = rawName.trim();
         if (!name) return null;
         const now = new Date().toISOString();
-        const tag: ProgressTag = {
-          id: makeId(),
-          name,
-          colorId: isProgressTagColorId(colorId) ? colorId : DEFAULT_PROGRESS_TAG_COLOR,
-          createdAt: now,
-          updatedAt: now
-        };
-        set((state) => ({
-          progressTags: [tag, ...state.progressTags],
-          dataUpdatedAt: now
-        }));
+        const tag: ProgressTag = { id: makeId(), name, colorId: isProgressTagColorId(colorId) ? colorId : DEFAULT_PROGRESS_TAG_COLOR, createdAt: now, updatedAt: now };
+        set((s) => ({ progressTags: [tag, ...s.progressTags], dataUpdatedAt: now }));
         return tag.id;
       },
 
@@ -1140,18 +534,9 @@ export const useQuestStore = create<QuestStore>()(
         const name = updates.name?.trim();
         const now = new Date().toISOString();
         let changed = false;
-        set((state) => ({
-          progressTags: state.progressTags.map((tag) => {
-            if (tag.id !== tagId) return tag;
-            changed = true;
-            return {
-              ...tag,
-              name: name || tag.name,
-              colorId: isProgressTagColorId(updates.colorId) ? updates.colorId : tag.colorId,
-              updatedAt: now
-            };
-          }),
-          dataUpdatedAt: changed ? now : state.dataUpdatedAt
+        set((s) => ({
+          progressTags: s.progressTags.map((t) => { if (t.id !== tagId) return t; changed = true; return { ...t, name: name || t.name, colorId: isProgressTagColorId(updates.colorId) ? updates.colorId : t.colorId, updatedAt: now }; }),
+          dataUpdatedAt: changed ? now : s.dataUpdatedAt
         }));
         return changed;
       },
@@ -1159,260 +544,94 @@ export const useQuestStore = create<QuestStore>()(
       deleteProgressTag: (tagId) => {
         const now = new Date().toISOString();
         let changed = false;
-        set((state) => ({
-          progressTags: state.progressTags.filter((tag) => {
-            if (tag.id !== tagId) return true;
-            changed = true;
-            return false;
-          }),
-          dataUpdatedAt: changed ? now : state.dataUpdatedAt
-        }));
+        set((s) => ({ progressTags: s.progressTags.filter((t) => { if (t.id !== tagId) return true; changed = true; return false; }), dataUpdatedAt: changed ? now : s.dataUpdatedAt }));
       },
 
-      useScroll: (className: ClassName) => {
-        const state = get();
-        const cs = state.classStates[className];
+      useScroll: (className) => {
+        const s = get();
+        const cs = s.classStates[className];
         if (cs.scrolls <= 0) return null;
-
         const result = learnSkillFromScroll(className, cs.skills);
         if (!result) return null;
         const line = getLineById(result.lineId);
         if (!line) return null;
 
         const updatedSkills = [...cs.skills];
-        const existingIdx = updatedSkills.findIndex((s) => s.lineId === result.lineId);
-
-        if (existingIdx >= 0) {
-          const existing = updatedSkills[existingIdx];
-          const newCopies = existing.copies + 1;
-          updatedSkills[existingIdx] = {
-            ...existing,
-            copies: newCopies,
-            currentTier: getTierFromCopies(newCopies)
-          };
-        } else {
-          updatedSkills.push({
-            lineId: result.lineId,
-            copies: 1,
-            currentTier: 1
-          });
-        }
+        const idx = updatedSkills.findIndex((sk) => sk.lineId === result.lineId);
+        if (idx >= 0) { const ex = updatedSkills[idx]; const nc = ex.copies + 1; updatedSkills[idx] = { ...ex, copies: nc, currentTier: getTierFromCopies(nc) }; }
+        else updatedSkills.push({ lineId: result.lineId, copies: 1, currentTier: 1 });
 
         const now = new Date().toISOString();
         const skillName = getSkillNameAtTier(line, result.toTier);
-        const log: ProgressLog = {
-          id: makeId(),
-          type: "scroll",
-          taskId: "scroll",
-          className,
-          note: result.isNew
-            ? `使用${CLASS_META[className].scrollName}习得 ${skillName}`
-            : result.upgraded
-              ? `使用${CLASS_META[className].scrollName}将 ${line.name} 升至 ${result.toTier} 环`
-              : `使用${CLASS_META[className].scrollName}强化 ${line.name}`,
-          at: now,
-          xpAwarded: 0,
-          classXpAwarded: 0,
-          progressCount: 0,
-          scrollEarned: CLASS_META[className].scrollName,
-          scrollCount: -1,
-          newSkill: result.isNew ? skillName : undefined,
-          skillUpgrade: result.upgraded
-            ? { name: skillName, fromTier: result.fromTier, toTier: result.toTier, className }
-            : undefined
-        };
+        const log: ProgressLog = { id: makeId(), type: "scroll", taskId: "scroll", className, note: result.isNew ? `使用${CLASS_META[className].scrollName}习得 ${skillName}` : result.upgraded ? `使用${CLASS_META[className].scrollName}将 ${line.name} 升至 ${result.toTier} 环` : `使用${CLASS_META[className].scrollName}强化 ${line.name}`, at: now, xpAwarded: 0, classXpAwarded: 0, progressCount: 0, scrollEarned: CLASS_META[className].scrollName, scrollCount: -1, newSkill: result.isNew ? skillName : undefined, skillUpgrade: result.upgraded ? { name: skillName, fromTier: result.fromTier, toTier: result.toTier, className } : undefined };
 
-        const currentFeatState = normalizeFeatState(state.featState);
-        const featClassXpBonus = result.isNew && hasFeat(currentFeatState, "collector", className) ? 5 : result.upgraded && hasFeat(currentFeatState, "skill-fanatic", className) ? 8 : 0;
+        const currentFeatState = normalizeFeatState(s.featState);
+        const featClassXp = result.isNew && hasFeat(currentFeatState, "collector", className) ? 5 : result.upgraded && hasFeat(currentFeatState, "skill-fanatic", className) ? 8 : 0;
         const featScrollBonus = result.isNew && hasFeat(currentFeatState, "codex-hunter", className) ? 1 : result.upgraded && hasFeat(currentFeatState, "treasure-hunter", className) && result.toTier >= 4 && Math.random() < 0.25 ? 1 : 0;
-        const updatedClassState = {
-          ...cs,
-          xp: cs.xp + featClassXpBonus,
-          scrolls: cs.scrolls - 1 + featScrollBonus,
-          skills: updatedSkills
-        };
+        const updatedState = { ...cs, xp: cs.xp + featClassXp, scrolls: cs.scrolls - 1 + featScrollBonus, skills: updatedSkills };
 
-        set({
-          logs: [log, ...state.logs],
-          classStates: {
-            ...state.classStates,
-            [className]: updatedClassState
-          },
-          featState: refreshPendingFeatChoices({ ...state.classStates, [className]: updatedClassState }, currentFeatState, now),
-          dataUpdatedAt: now
-        });
-
+        set({ logs: [log, ...s.logs], classStates: { ...s.classStates, [className]: updatedState }, featState: refreshPendingFeatChoices({ ...s.classStates, [className]: updatedState }, currentFeatState, now), dataUpdatedAt: now });
         return result;
       },
 
       getBackupData: () => createBackupData(get()),
+      exportData: () => downloadBackup(createBackupData(get())),
 
-      exportData: () => {
-        downloadBackup(createBackupData(get()));
-      },
-
-      importData: (jsonString: string, options): boolean => {
+      importData: (jsonString, options) => {
         try {
           const data = JSON.parse(jsonString);
           if (!data.tasks) return false;
           const now = new Date().toISOString();
           const importedUpdatedAt = data.updatedAt ?? data.exportedAt ?? now;
           const tasks = normalizeTasks(data.tasks);
-          set({
-            tasks,
-            logs: normalizeLogs(data.logs, tasks),
-            focusTaskId: data.focusTaskId,
-            totalXp: data.totalXp ?? 0,
-            streak: data.streak ?? { count: 0 },
-            momentumTaskId: data.momentumTaskId,
-            momentumCount: data.momentumCount ?? 0,
-            classStates: normalizeClassStates(data.classStates),
-            lastProgressDate: data.lastProgressDate,
-            dataUpdatedAt: importedUpdatedAt,
-            lastSyncedAt: options?.markSyncedAt ?? data.lastSyncedAt,
-            lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined,
-            discoveredResonances: data.discoveredResonances ?? {},
-            resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs(),
-            resonanceChain: data.resonanceChain ?? { count: 0 },
-            featState: refreshPendingFeatChoices(normalizeClassStates(data.classStates), normalizeFeatState(data.featState), now),
-            progressTags: normalizeProgressTags(data.progressTags)
-          });
+          set({ tasks, logs: normalizeLogs(data.logs, tasks), focusTaskId: data.focusTaskId, totalXp: data.totalXp ?? 0, streak: data.streak ?? { count: 0 }, momentumTaskId: data.momentumTaskId, momentumCount: data.momentumCount ?? 0, classStates: normalizeClassStates(data.classStates), lastProgressDate: data.lastProgressDate, dataUpdatedAt: importedUpdatedAt, lastSyncedAt: options?.markSyncedAt ?? data.lastSyncedAt, lastProgressClass: isClassName(data.lastProgressClass) ? data.lastProgressClass : undefined, discoveredResonances: data.discoveredResonances ?? {}, resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs(), resonanceChain: data.resonanceChain ?? { count: 0 }, featState: refreshPendingFeatChoices(normalizeClassStates(data.classStates), normalizeFeatState(data.featState), now), progressTags: normalizeProgressTags(data.progressTags) });
           return true;
-        } catch {
-          return false;
-        }
+        } catch { return false; }
       },
 
       clearAll: () => {
         const now = new Date().toISOString();
-        set({
-          tasks: [],
-          logs: [],
-          focusTaskId: undefined,
-          totalXp: 0,
-          streak: { count: 0 },
-          momentumTaskId: undefined,
-          momentumCount: 0,
-          classStates: initClassState(),
-          lastProgressDate: undefined,
-          dataUpdatedAt: now,
-          lastSyncedAt: undefined,
-          lastProgressClass: undefined,
-          restState: undefined,
-          discoveredResonances: {},
-          resonanceBuffs: createInitialResonanceBuffs(),
-          resonanceChain: { count: 0 },
-          featState: createInitialFeatState(),
-          progressTags: []
-        });
+        set({ tasks: [], logs: [], focusTaskId: undefined, totalXp: 0, streak: { count: 0 }, momentumTaskId: undefined, momentumCount: 0, classStates: initClassState(), lastProgressDate: undefined, dataUpdatedAt: now, lastSyncedAt: undefined, lastProgressClass: undefined, restState: undefined, discoveredResonances: {}, resonanceBuffs: createInitialResonanceBuffs(), resonanceChain: { count: 0 }, featState: createInitialFeatState(), progressTags: [] });
       },
 
-      startShortRest: () => {
-        const state = get();
-        if (state.restState) return;
-        const now = new Date();
-        const endsAt = new Date(now.getTime() + 5 * 60 * 1000).toISOString();
-        set({ restState: { type: "short", startedAt: now.toISOString(), endsAt }, dataUpdatedAt: now.toISOString() });
-      },
-
-      startLongRest: () => {
-        const state = get();
-        if (state.restState) return;
-        const now = new Date();
-        const endsAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString();
-        set({ restState: { type: "long", startedAt: now.toISOString(), endsAt }, dataUpdatedAt: now.toISOString() });
-      },
+      startShortRest: () => { if (get().restState) return; const now = new Date(); set({ restState: { type: "short", startedAt: now.toISOString(), endsAt: new Date(now.getTime() + 5 * 60 * 1000).toISOString() }, dataUpdatedAt: now.toISOString() }); },
+      startLongRest: () => { if (get().restState) return; const now = new Date(); set({ restState: { type: "long", startedAt: now.toISOString(), endsAt: new Date(now.getTime() + 15 * 60 * 1000).toISOString() }, dataUpdatedAt: now.toISOString() }); },
 
       completeRest: () => {
-        const state = get();
-        if (!state.restState) return;
-        const updatedClassStates = { ...state.classStates };
-
-        if (state.restState.type === "short") {
-          // Short rest: reduce fatigue by 30%, min 0
-          const recovery = hasFeat(state.featState, "nap") ? Math.round(SHORT_REST_RECOVERY * 1.1) : SHORT_REST_RECOVERY;
-          for (const cn of classNames) {
-            updatedClassStates[cn] = {
-              ...updatedClassStates[cn],
-              fatigue: Math.max(0, updatedClassStates[cn].fatigue - recovery)
-            };
-          }
+        const s = get();
+        if (!s.restState) return;
+        const updated = { ...s.classStates };
+        if (s.restState.type === "short") {
+          const recovery = hasFeat(s.featState, "nap") ? Math.round(SHORT_REST_RECOVERY * 1.1) : SHORT_REST_RECOVERY;
+          for (const cn of classNames) updated[cn] = { ...updated[cn], fatigue: Math.max(0, updated[cn].fatigue - recovery) };
         } else {
-          // Long rest: reset all fatigue to 0
-          for (const cn of classNames) {
-            updatedClassStates[cn] = {
-              ...updatedClassStates[cn],
-              fatigue: 0
-            };
-          }
-          if (state.resonanceBuffs.longRestScrolls > 0) {
-            const targetClass = state.lastProgressClass ?? "Wizard";
-            updatedClassStates[targetClass] = {
-              ...updatedClassStates[targetClass],
-              scrolls: updatedClassStates[targetClass].scrolls + state.resonanceBuffs.longRestScrolls
-            };
-          }
+          for (const cn of classNames) updated[cn] = { ...updated[cn], fatigue: 0 };
+          if (s.resonanceBuffs.longRestScrolls > 0) { const tc = s.lastProgressClass ?? "Wizard"; updated[tc] = { ...updated[tc], scrolls: updated[tc].scrolls + s.resonanceBuffs.longRestScrolls }; }
         }
-
-        const nextResonanceBuffs = state.restState.type === "long"
-          ? { ...state.resonanceBuffs, longRestScrolls: 0 }
-          : state.resonanceBuffs;
-        const currentFeatState = normalizeFeatState(state.featState);
-        const targetClass = state.lastProgressClass ?? "Wizard";
-        if (state.restState.type === "long" && hasFeat(currentFeatState, "deep-sleep")) {
-          updatedClassStates[targetClass] = {
-            ...updatedClassStates[targetClass],
-            scrolls: updatedClassStates[targetClass].scrolls + 1
-          };
-        }
-        if (hasFeat(currentFeatState, "meditator")) {
-          updatedClassStates[targetClass] = {
-            ...updatedClassStates[targetClass],
-            xp: updatedClassStates[targetClass].xp + (state.restState.type === "long" ? 20 : 8)
-          };
-        }
-        const nextFeatState = {
-          ...currentFeatState,
-          shortRestCount: currentFeatState.shortRestCount + (state.restState.type === "short" ? 1 : 0),
-          longRestCount: currentFeatState.longRestCount + (state.restState.type === "long" ? 1 : 0)
-        };
+        const nextBuffs = s.restState.type === "long" ? { ...s.resonanceBuffs, longRestScrolls: 0 } : s.resonanceBuffs;
+        const currentFeat = normalizeFeatState(s.featState);
+        const tc = s.lastProgressClass ?? "Wizard";
+        if (s.restState.type === "long" && hasFeat(currentFeat, "deep-sleep")) updated[tc] = { ...updated[tc], scrolls: updated[tc].scrolls + 1 };
+        if (hasFeat(currentFeat, "meditator")) updated[tc] = { ...updated[tc], xp: updated[tc].xp + (s.restState.type === "long" ? 20 : 8) };
+        const nextFeat = { ...currentFeat, shortRestCount: currentFeat.shortRestCount + (s.restState.type === "short" ? 1 : 0), longRestCount: currentFeat.longRestCount + (s.restState.type === "long" ? 1 : 0) };
         const now = new Date().toISOString();
-        set({
-          classStates: updatedClassStates,
-          restState: undefined,
-          resonanceBuffs: nextResonanceBuffs,
-          featState: refreshPendingFeatChoices(updatedClassStates, nextFeatState, now),
-          dataUpdatedAt: now
-        });
+        set({ classStates: updated, restState: undefined, resonanceBuffs: nextBuffs, featState: refreshPendingFeatChoices(updated, nextFeat, now), dataUpdatedAt: now });
       },
 
-      cancelRest: () => {
-        set({ restState: undefined, dataUpdatedAt: new Date().toISOString() });
-      },
+      cancelRest: () => set({ restState: undefined, dataUpdatedAt: new Date().toISOString() }),
 
       chooseFeat: (choiceId, featId) => {
-        const state = get();
-        const currentFeatState = normalizeFeatState(state.featState);
-        const choice = currentFeatState.pending.find((item) => item.id === choiceId);
-        if (!choice || !choice.choices.includes(featId) || !FEAT_MAP[featId]) return false;
-        if (currentFeatState.owned.some((feat) => feat.id === featId)) return false;
+        const s = get();
+        const current = normalizeFeatState(s.featState);
+        const choice = current.pending.find((c) => c.id === choiceId);
+        if (!choice || !choice.choices.includes(featId) || !FEAT_MAP[featId] || current.owned.some((f) => f.id === featId)) return false;
         const now = new Date().toISOString();
-        const nextFeatState: FeatState = {
-          ...currentFeatState,
-          owned: [
-            ...currentFeatState.owned,
-            { id: featId, className: choice.className, selectedAt: now, level: choice.level }
-          ],
-          pending: currentFeatState.pending.filter((item) => item.id !== choiceId)
-        };
-        set({ featState: refreshPendingFeatChoices(state.classStates, nextFeatState, now), dataUpdatedAt: now });
+        const nextFeat = { ...current, owned: [...current.owned, { id: featId, className: choice.className, selectedAt: now, level: choice.level }], pending: current.pending.filter((c) => c.id !== choiceId) };
+        set({ featState: refreshPendingFeatChoices(s.classStates, nextFeat, now), dataUpdatedAt: now });
         return true;
       },
 
-      markSynced: (syncedAt) => {
-        // Sync metadata should not bump dataUpdatedAt, or the just-synced backup looks stale immediately.
-        set({ lastSyncedAt: syncedAt });
-      }
+      markSynced: (syncedAt) => set({ lastSyncedAt: syncedAt }),
     }),
     {
       name: "questflow-v1",
@@ -1422,153 +641,30 @@ export const useQuestStore = create<QuestStore>()(
         const persisted = persistedState as Record<string, unknown>;
         let data = persisted;
 
-        if (version < 3) {
-          data = {
-            ...persisted,
-            totalXp: persisted.xp ?? 0,
-            classStates: initClassState(),
-            lastProgressDate: undefined
-          };
-        }
-
-        // v3→v4: recompute all skill tiers from copies using 2^(n-1) formula
+        if (version < 3) data = { ...persisted, totalXp: persisted.xp ?? 0, classStates: initClassState(), lastProgressDate: undefined };
         if (version < 4 && data.classStates) {
-          const cs = data.classStates as Record<string, { skills: OwnedSkill[] }>;
-          for (const key of Object.keys(cs)) {
-            cs[key].skills = cs[key].skills.map((s) => ({
-              ...s,
-              currentTier: getTierFromCopies(s.copies)
-            }));
-          }
+          const cs = data.classStates as Record<string, { skills: import("@/data/classes").OwnedSkill[] }>;
+          for (const key of Object.keys(cs)) cs[key].skills = cs[key].skills.map((s) => ({ ...s, currentTier: getTierFromCopies(s.copies) }));
         }
-
-        // v4→v5: reset skills to new line-based system (incompatible structure change)
-        if (version < 5 && data.classStates) {
-          const cs = data.classStates as Record<string, { skills: unknown[]; scrolls: number }>;
-          for (const key of Object.keys(cs)) {
-            cs[key].skills = [];
-          }
-        }
-
-        // v5→v6: add sync timestamps for WebDAV conflict detection
+        if (version < 5 && data.classStates) { const cs = data.classStates as Record<string, { skills: unknown[]; scrolls: number }>; for (const key of Object.keys(cs)) cs[key].skills = []; }
         if (version < 6) {
           const tasks = (data.tasks as Array<{ updatedAt?: string }> | undefined) ?? [];
           const logs = (data.logs as Array<{ at?: string }> | undefined) ?? [];
-          const candidates = [
-            data.dataUpdatedAt as string | undefined,
-            ...tasks.map((task) => task.updatedAt),
-            ...logs.map((log) => log.at)
-          ].filter(Boolean) as string[];
-          data = {
-            ...data,
-            tasks: normalizeTasks(data.tasks),
-            dataUpdatedAt:
-              candidates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ??
-              undefined,
-            lastSyncedAt: data.lastSyncedAt
-          };
+          data = { ...data, tasks: normalizeTasks(data.tasks), dataUpdatedAt: ([data.dataUpdatedAt, ...tasks.map((t) => t.updatedAt), ...logs.map((l) => l.at)].filter(Boolean) as string[]).sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? undefined, lastSyncedAt: data.lastSyncedAt };
         }
-
-        // v6→v7: add fatigue to ClassState, tags to QuestTask, lastProgressClass
         if (version < 7) {
-          if (data.classStates) {
-            const cs = data.classStates as Record<string, { fatigue?: number; skills: unknown[]; scrolls: number; xp: number }>;
-            for (const key of Object.keys(cs)) {
-              if (typeof cs[key].fatigue !== "number") {
-                cs[key].fatigue = 0;
-              }
-            }
-          }
-          if (data.tasks) {
-            data.tasks = normalizeTasks(data.tasks);
-          }
-          data = {
-            ...data,
-            lastProgressClass: data.lastProgressClass ?? undefined,
-            restState: undefined
-          };
+          if (data.classStates) { const cs = data.classStates as Record<string, { fatigue?: number; skills: unknown[]; scrolls: number; xp: number }>; for (const key of Object.keys(cs)) if (typeof cs[key].fatigue !== "number") cs[key].fatigue = 0; }
+          if (data.tasks) data.tasks = normalizeTasks(data.tasks);
+          data = { ...data, lastProgressClass: data.lastProgressClass ?? undefined, restState: undefined };
         }
-
-        // v7→v8: add 7 new classes (Paladin, Ranger, Druid, Warlock, Sorcerer, Monk, Barbarian)
-        if (version < 8) {
-          if (data.classStates) {
-            const cs = data.classStates as Record<string, unknown>;
-            const newClasses = ["Paladin", "Ranger", "Druid", "Warlock", "Sorcerer", "Monk", "Barbarian"];
-            for (const cn of newClasses) {
-              if (!cs[cn]) {
-                cs[cn] = { xp: 0, scrolls: 0, skills: [], fatigue: 0 };
-              }
-            }
-          }
-        }
-
-        // v8→v9: add class resonance collection and pending resonance buffs
-        if (version < 9) {
-          data = {
-            ...data,
-            discoveredResonances: data.discoveredResonances ?? {},
-            resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs()
-          };
-        }
-
-        // v9→v10: add resonance chain counter
-        if (version < 10) {
-          data = {
-            ...data,
-            resonanceChain: data.resonanceChain ?? { count: 0 }
-          };
-        }
-
-        // v10→v11: add log type/className so summaries and skill events are exact.
-        if (version < 11) {
-          const tasks = normalizeTasks(data.tasks);
-          data = {
-            ...data,
-            tasks,
-            logs: normalizeLogs(data.logs, tasks)
-          };
-        }
-
-        // v11→v12: add per-task todo lists and todo attribution on progress logs.
-        if (version < 12) {
-          const tasks = normalizeTasks(data.tasks);
-          data = {
-            ...data,
-            tasks,
-            logs: normalizeLogs(data.logs, tasks)
-          };
-        }
-
-        // v12→v13: add permanent class feats, pending feat choices and rest counters.
-        if (version < 13) {
-          const classStates = normalizeClassStates(data.classStates);
-          data = {
-            ...data,
-            classStates,
-            featState: refreshPendingFeatChoices(classStates, normalizeFeatState(data.featState), new Date().toISOString())
-          };
-        }
-
-        // v13→v14: add reusable progress tags and tag snapshots on progress logs.
-        if (version < 14) {
-          const tasks = normalizeTasks(data.tasks);
-          data = {
-            ...data,
-            tasks,
-            logs: normalizeLogs(data.logs, tasks),
-            progressTags: normalizeProgressTags(data.progressTags)
-          };
-        }
-
-        // v14→v15: add daily/weekly recurring task tags and completion keys.
-        if (version < 15) {
-          const tasks = normalizeTasks(data.tasks);
-          data = {
-            ...data,
-            tasks,
-            logs: normalizeLogs(data.logs, tasks)
-          };
-        }
+        if (version < 8 && data.classStates) { const cs = data.classStates as Record<string, unknown>; for (const cn of ["Paladin", "Ranger", "Druid", "Warlock", "Sorcerer", "Monk", "Barbarian"]) if (!cs[cn]) cs[cn] = { xp: 0, scrolls: 0, skills: [], fatigue: 0 }; }
+        if (version < 9) data = { ...data, discoveredResonances: data.discoveredResonances ?? {}, resonanceBuffs: data.resonanceBuffs ?? createInitialResonanceBuffs() };
+        if (version < 10) data = { ...data, resonanceChain: data.resonanceChain ?? { count: 0 } };
+        if (version < 11) { const tasks = normalizeTasks(data.tasks); data = { ...data, tasks, logs: normalizeLogs(data.logs, tasks) }; }
+        if (version < 12) { const tasks = normalizeTasks(data.tasks); data = { ...data, tasks, logs: normalizeLogs(data.logs, tasks) }; }
+        if (version < 13) { const classStates = normalizeClassStates(data.classStates); data = { ...data, classStates, featState: refreshPendingFeatChoices(classStates, normalizeFeatState(data.featState), new Date().toISOString()) }; }
+        if (version < 14) { const tasks = normalizeTasks(data.tasks); data = { ...data, tasks, logs: normalizeLogs(data.logs, tasks), progressTags: normalizeProgressTags(data.progressTags) }; }
+        if (version < 15) { const tasks = normalizeTasks(data.tasks); data = { ...data, tasks, logs: normalizeLogs(data.logs, tasks) }; }
 
         return data;
       }
