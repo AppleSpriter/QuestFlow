@@ -21,6 +21,14 @@ import {
   Tent,
   Trophy
 } from "lucide-react";
+import {
+  applyTheme,
+  resolveInitialTheme,
+  setStoredTheme,
+  subscribeThemeChange,
+  syncThemeWithSystemOncePerDay,
+  type ThemeMode
+} from "./theme";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
@@ -227,7 +235,7 @@ export default function QuestFlowPage() {
   const [mounted, setMounted] = useState(false);
   const [title, setTitle] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [darkMode, setDarkMode] = useState(false);
+  const [theme, setTheme] = useState<ThemeMode>("light");
   const [selectedClass, setSelectedClass] = useState<ClassName>("Wizard");
   const [statusFilter, setStatusFilter] = useState<QuestStatus>("active");
   const [progressNote, setProgressNote] = useState("");
@@ -295,31 +303,15 @@ export default function QuestFlowPage() {
   };
 
   useEffect(() => {
+    setTheme(syncThemeWithSystemOncePerDay());
     setMounted(true);
-    refreshRecurringTasks();
 
-    const interval = window.setInterval(refreshRecurringTasks, 60 * 1000);
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") refreshRecurringTasks();
-    };
-    window.addEventListener("focus", refreshRecurringTasks);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshRecurringTasks);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [refreshRecurringTasks]);
-
-  useEffect(() => () => {
-    if (normalResonanceTimerRef.current) clearTimeout(normalResonanceTimerRef.current);
+    return subscribeThemeChange(setTheme);
   }, []);
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", darkMode);
-    document.documentElement.dataset.theme = darkMode ? "dark" : "light";
-  }, [darkMode]);
+    applyTheme(theme);
+  }, [theme]);
 
   const taskSearchText = useCallback((task: QuestTask) => {
     const taskClass = getTaskClass(task);
@@ -398,6 +390,7 @@ export default function QuestFlowPage() {
   );
   const level = getLevelProgress(totalXp);
 
+  const darkMode = theme === "dark";
   const focusRegionId = focusTask ? "camp" : "camp";
   const focusBg = darkMode
     ? darkRegionBackgrounds[focusRegionId] ?? darkRegionBackgrounds.camp
@@ -938,7 +931,7 @@ export default function QuestFlowPage() {
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => setDarkMode((value) => !value)}
+          onClick={() => setStoredTheme(darkMode ? "light" : "dark")}
           className="focus-ring inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-[0.97] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
           aria-label={darkMode ? "切换到亮色主题" : "切换到暗色主题"}
         >

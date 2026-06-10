@@ -44,21 +44,21 @@ export default function BuildPage() {
   const topBuild = buildSummaries[0];
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-violet-50 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-violet-50 px-4 py-6 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-violet-950 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <Link href="/" className="mb-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 active:scale-[0.97]">
+            <Link href="/" className="mb-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 active:scale-[0.97] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
               <ArrowLeft size={16} /> 返回冒险
             </Link>
-            <h1 className="flex items-center gap-2 text-3xl font-black text-slate-950">
+            <h1 className="flex items-center gap-2 text-3xl font-black text-slate-950 dark:text-slate-100">
               <Trophy className="text-orange-500" /> Build Hall
             </h1>
             <p className="mt-2 text-sm text-slate-500">专长决定 Build。系统根据职业 XP、专长、共鸣与技能图鉴自动识别成长路线。</p>
           </div>
           <div className="rounded-2xl border border-orange-200 bg-white/80 px-5 py-3 shadow-lift backdrop-blur">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-orange-500">当前评分</div>
-            <div className="mt-1 text-2xl font-black text-slate-950">{topBuild?.rating ?? "萌芽型 Build"}</div>
+            <div className="mt-1 text-2xl font-black text-slate-950 dark:text-slate-100">{topBuild?.rating ?? "萌芽型 Build"}</div>
           </div>
         </header>
 
@@ -96,7 +96,7 @@ export default function BuildPage() {
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="text-sm font-black uppercase tracking-[0.22em] text-orange-500">Selected Class</div>
-                    <h2 className="mt-2 text-4xl font-black text-slate-950">{selectedMeta.emoji} {selectedClass}</h2>
+                    <h2 className="mt-2 text-4xl font-black text-slate-950 dark:text-slate-100">{selectedMeta.emoji} {selectedClass}</h2>
                     <p className="mt-2 text-sm font-semibold text-slate-500">{selectedMeta.label} · {selectedMeta.scrollName}</p>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center">
@@ -116,7 +116,7 @@ export default function BuildPage() {
 
             <div className="grid gap-5 lg:grid-cols-2">
               <section className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-lift">
-                <h3 className="flex items-center gap-2 text-xl font-black text-slate-950"><Gem className="text-violet-500" /> 专长选择</h3>
+                <h3 className="flex items-center gap-2 text-xl font-black text-slate-950 dark:text-slate-100"><Gem className="text-violet-500" /> 专长选择</h3>
                 <div className="mt-4 space-y-4">
                   {pendingChoices.length > 0 ? pendingChoices.map((choice) => (
                     <PendingFeatChoicePanel key={choice.id} choice={choice} onSelect={chooseFeat} />
@@ -144,12 +144,12 @@ export default function BuildPage() {
               </section>
 
               <section className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-lift">
-                <h3 className="flex items-center gap-2 text-xl font-black text-slate-950"><Trophy className="text-orange-500" /> Build 识别</h3>
+                <h3 className="flex items-center gap-2 text-xl font-black text-slate-950 dark:text-slate-100"><Trophy className="text-orange-500" /> Build 识别</h3>
                 <div className="mt-4 space-y-3">
                   {buildSummaries.length > 0 ? buildSummaries.map((build) => (
                     <div key={build.id} className="rounded-2xl border border-orange-100 bg-orange-50/70 p-4">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-lg font-black text-slate-950">{build.emoji} {build.name}</div>
+                        <div className="text-lg font-black text-slate-950 dark:text-slate-100">{build.emoji} {build.name}</div>
                         <span className="rounded-full bg-white px-2 py-1 text-xs font-black text-orange-600">{build.rating}</span>
                       </div>
                       <p className="mt-1 text-sm font-bold text-orange-700">{build.summary}</p>
@@ -205,7 +205,7 @@ function PendingFeatChoicePanel({ choice, onSelect }: { choice: PendingFeatChoic
               className={`rounded-2xl border bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 active:scale-[0.98] ${selected ? "border-amber-400 ring-4 ring-amber-100" : "border-slate-100"}`}
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-black text-slate-950">{feat.emoji} {feat.name}</div>
+                <div className="text-sm font-black text-slate-950 dark:text-slate-100">{feat.emoji} {feat.name}</div>
                 <span className="rounded-full px-2 py-0.5 text-[10px] font-black" style={{ backgroundColor: `${quality.color}1A`, color: quality.color }}>{quality.emoji}</span>
               </div>
               <div className="mt-1 text-[11px] font-black" style={{ color: flow.color }}>{flow.emoji} {flow.label}</div>
@@ -225,7 +225,7 @@ function MetricBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 shadow-sm">
       <div className="text-xs font-bold text-slate-400">{label}</div>
-      <div className="mt-1 text-lg font-black text-slate-950">{value}</div>
+      <div className="mt-1 text-lg font-black text-slate-950 dark:text-slate-100">{value}</div>
     </div>
   );
 }

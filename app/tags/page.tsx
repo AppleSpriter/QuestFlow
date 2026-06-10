@@ -75,21 +75,21 @@ export default function TagsPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-sky-50 px-4 py-6 text-slate-900 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-sky-50 px-4 py-6 text-slate-900 dark:from-slate-950 dark:via-emerald-950 dark:to-slate-900 dark:text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
         <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <Link href="/" className="mb-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 active:scale-[0.97]">
+            <Link href="/" className="mb-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 active:scale-[0.97] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
               <ArrowLeft size={16} /> 返回冒险
             </Link>
-            <h1 className="flex items-center gap-2 text-3xl font-black text-slate-950">
+            <h1 className="flex items-center gap-2 text-3xl font-black text-slate-950 dark:text-slate-100">
               <Tags className="text-emerald-500" /> Progress Tags
             </h1>
             <p className="mt-2 text-sm text-slate-500">配置常用推进标签，例如“群追踪”“复盘”“客户跟进”，推进任务时一键选择并写入日志。</p>
           </div>
           <div className="rounded-2xl border border-emerald-200 bg-white/80 px-5 py-3 shadow-lift backdrop-blur">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-500">Reusable Tags</div>
-            <div className="mt-1 text-2xl font-black text-slate-950">{progressTags.length}</div>
+            <div className="mt-1 text-2xl font-black text-slate-950 dark:text-slate-100">{progressTags.length}</div>
           </div>
         </header>
 
@@ -101,7 +101,7 @@ export default function TagsPage() {
 
         <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
           <section className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-lift">
-            <h2 className="text-xl font-black text-slate-950">{editingTag ? "编辑标签" : "新建标签"}</h2>
+            <h2 className="text-xl font-black text-slate-950 dark:text-slate-100">{editingTag ? "编辑标签" : "新建标签"}</h2>
             <form onSubmit={submitTag} className="mt-4 space-y-4">
               <div>
                 <label htmlFor="tag-name" className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Tag Name</label>
@@ -110,7 +110,7 @@ export default function TagsPage() {
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="例如：群追踪"
-                  className="focus-ring mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-950 placeholder:text-slate-400"
+                  className="focus-ring mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-950 dark:text-slate-100 placeholder:text-slate-400"
                 />
               </div>
               <div>
@@ -156,7 +156,7 @@ export default function TagsPage() {
           <section className="rounded-3xl border border-white/80 bg-white/90 p-5 shadow-lift">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-black text-slate-950">标签列表</h2>
+                <h2 className="text-xl font-black text-slate-950 dark:text-slate-100">标签列表</h2>
                 <p className="mt-1 text-sm text-slate-500">删除标签不会影响历史日志，历史记录保留当时的标签快照。</p>
               </div>
             </div>
