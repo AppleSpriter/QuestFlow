@@ -13,6 +13,7 @@ type WebDavRequest = {
   config?: Partial<WebDavConfig>;
   payload?: unknown;
   target?: WebDavFileTarget;
+  ifMatch?: string;
 };
 
 const getAuthHeader = (config: WebDavConfig) =>
@@ -142,19 +143,24 @@ export async function POST(request: Request) {
         method: "PUT",
         headers: {
           Authorization: authHeader,
-          "Content-Type": "application/json; charset=utf-8"
+          "Content-Type": "application/json; charset=utf-8",
+          ...(body.ifMatch ? { "If-Match": body.ifMatch } : {})
         },
         body: content
       });
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
+        const conflict = response.status === 412;
         return NextResponse.json(
           {
             ok: false,
-            message: `上传云端存档失败 (${response.status}) ${text.slice(0, 180)}`
+            conflict,
+            message: conflict
+              ? "云端存档已被其他设备更新，请先重新同步后再上传。"
+              : `上传云端存档失败 (${response.status}) ${text.slice(0, 180)}`
           },
-          { status: 400 }
+          { status: conflict ? 409 : 400 }
         );
       }
 

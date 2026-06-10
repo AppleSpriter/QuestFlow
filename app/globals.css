@@ -124,6 +124,15 @@ select {
   background-color: rgba(30, 41, 59, 0.88) !important;
 }
 
+.dark .bg-stone-50,
+[data-theme="dark"] .bg-stone-50,
+.dark .bg-stone-100,
+[data-theme="dark"] .bg-stone-100,
+.dark .bg-stone-200,
+[data-theme="dark"] .bg-stone-200 {
+  background-color: rgba(41, 37, 36, 0.9) !important;
+}
+
 .dark .border-slate-100,
 [data-theme="dark"] .border-slate-100,
 .dark .border-slate-200,
@@ -131,6 +140,13 @@ select {
 .dark .border-slate-300,
 [data-theme="dark"] .border-slate-300 {
   border-color: rgba(71, 85, 105, 0.72) !important;
+}
+
+.dark .border-stone-200,
+[data-theme="dark"] .border-stone-200,
+.dark .border-stone-300,
+[data-theme="dark"] .border-stone-300 {
+  border-color: rgba(120, 113, 108, 0.72) !important;
 }
 
 .dark .text-slate-950,
@@ -144,6 +160,13 @@ select {
 .dark .text-slate-600,
 [data-theme="dark"] .text-slate-600 {
   color: var(--text-strong) !important;
+}
+
+.dark .text-stone-700,
+[data-theme="dark"] .text-stone-700,
+.dark .text-stone-800,
+[data-theme="dark"] .text-stone-800 {
+  color: #e7e5e4 !important;
 }
 
 .dark .text-slate-500,

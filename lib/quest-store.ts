@@ -223,6 +223,53 @@ const addResonanceReward = (
   if (rewardType === "longRestScroll") nextResonanceBuffs.longRestScrolls += 1;
 };
 
+const getProgressTagSnapshots = (progressTags: ProgressTag[], progressTagIds: string[] = []) =>
+  progressTagIds.reduce<ProgressTagSnapshot[]>((items, tagId) => {
+    if (items.some((item) => item.id === tagId)) return items;
+    const tag = progressTags.find((item) => item.id === tagId);
+    if (tag) items.push({ id: tag.id, name: tag.name, colorId: tag.colorId });
+    return items;
+  }, []);
+
+const createResonanceTrigger = ({
+  previousClass,
+  currentClass,
+  discoveredResonances,
+  resonanceChain,
+  at
+}: {
+  previousClass?: ClassName;
+  currentClass: ClassName;
+  discoveredResonances: QuestStoreState["discoveredResonances"];
+  resonanceChain: ResonanceChainState;
+  at: string;
+}): ResonanceTrigger | undefined => {
+  if (!previousClass || previousClass === currentClass) return undefined;
+  const definition = RESONANCE_MAP[getResonanceKey(previousClass, currentClass)];
+  if (!definition) return undefined;
+  const previousDiscovery = discoveredResonances[definition.key];
+  const triggerCount = (previousDiscovery?.triggerCount ?? 0) + 1;
+  const previousLevel = getResonanceLevel(previousDiscovery?.triggerCount ?? 0);
+  const level = getResonanceLevel(triggerCount);
+  const chainCount = resonanceChain.lastClass && resonanceChain.lastClass !== currentClass ? resonanceChain.count + 1 : 1;
+
+  return {
+    key: definition.key,
+    name: definition.name,
+    classes: definition.classes,
+    reward: definition.reward,
+    description: definition.description,
+    discoveredAt: previousDiscovery?.discoveredAt ?? at,
+    triggerCount,
+    level,
+    previousLevel,
+    leveledUp: level > previousLevel,
+    chainCount,
+    chainBonus: chainCount >= 5,
+    isNew: !previousDiscovery
+  };
+};
+
 // ─── Backup helpers ───
 
 const getDerivedUpdatedAt = (state: Pick<QuestStore, "dataUpdatedAt" | "tasks" | "logs">) => {
@@ -333,6 +380,7 @@ type QuestStoreState = {
   clearUndo: () => void;
   clearAll: () => void;
   markSynced: (syncedAt: string) => void;
+  pruneLogsBefore: (cutoffIso: string) => number;
 };
 
 type QuestStore = QuestStoreState;
@@ -499,12 +547,7 @@ export const useQuestStore = create<QuestStore>()(
         const task = s.tasks.find((t) => t.id === taskId);
         if (!task || task.status === "archived") return null;
         const opts: ProgressTaskOptions = typeof options === "string" ? { note: options, todo: legacyTodo } : options ?? {};
-        const selectedTags = (opts.progressTagIds ?? []).reduce<ProgressTagSnapshot[]>((items, tid) => {
-          if (items.some((i) => i.id === tid)) return items;
-          const tg = s.progressTags.find((t) => t.id === tid);
-          if (tg) items.push({ id: tg.id, name: tg.name, colorId: tg.colorId });
-          return items;
-        }, []);
+        const selectedTags = getProgressTagSnapshots(s.progressTags, opts.progressTagIds);
 
         const now = new Date();
         const at = now.toISOString();
@@ -513,18 +556,13 @@ export const useQuestStore = create<QuestStore>()(
         const fatigueBefore = s.classStates[taskClassName].fatigue;
 
         const synergyActive = !!s.lastProgressClass && s.lastProgressClass !== taskClassName;
-        const resDef = synergyActive && s.lastProgressClass ? RESONANCE_MAP[getResonanceKey(s.lastProgressClass, taskClassName)] : undefined;
-        const prevDiscovery = resDef ? s.discoveredResonances[resDef.key] : undefined;
-        const resonance: ResonanceTrigger | undefined = resDef ? {
-          key: resDef.key, name: resDef.name, classes: resDef.classes, reward: resDef.reward, description: resDef.description,
-          discoveredAt: prevDiscovery?.discoveredAt ?? at, triggerCount: (prevDiscovery?.triggerCount ?? 0) + 1,
-          level: getResonanceLevel((prevDiscovery?.triggerCount ?? 0) + 1),
-          previousLevel: getResonanceLevel(prevDiscovery?.triggerCount ?? 0),
-          leveledUp: getResonanceLevel((prevDiscovery?.triggerCount ?? 0) + 1) > getResonanceLevel(prevDiscovery?.triggerCount ?? 0),
-          chainCount: s.resonanceChain.lastClass && s.resonanceChain.lastClass !== taskClassName ? s.resonanceChain.count + 1 : 1,
-          chainBonus: s.resonanceChain.lastClass && s.resonanceChain.lastClass !== taskClassName ? s.resonanceChain.count + 1 >= 5 : false,
-          isNew: !prevDiscovery
-        } : undefined;
+        const resonance = createResonanceTrigger({
+          previousClass: s.lastProgressClass,
+          currentClass: taskClassName,
+          discoveredResonances: s.discoveredResonances,
+          resonanceChain: s.resonanceChain,
+          at
+        });
 
         const momentum = s.momentumTaskId === taskId ? s.momentumCount + 1 : 1;
         const nextBuffs = { ...s.resonanceBuffs };
@@ -740,6 +778,22 @@ export const useQuestStore = create<QuestStore>()(
       },
 
       markSynced: (syncedAt) => set({ lastSyncedAt: syncedAt }),
+
+      pruneLogsBefore: (cutoffIso) => {
+        const cutoffTime = new Date(cutoffIso).getTime();
+        if (!Number.isFinite(cutoffTime)) return 0;
+        const now = new Date().toISOString();
+        let removed = 0;
+        set((state) => {
+          const logs = state.logs.filter((log) => {
+            const keep = new Date(log.at).getTime() >= cutoffTime;
+            if (!keep) removed += 1;
+            return keep;
+          });
+          return removed > 0 ? { logs, dataUpdatedAt: now } : state;
+        });
+        return removed;
+      },
     }),
     {
       name: STORAGE_KEY,

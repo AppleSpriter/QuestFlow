@@ -46,6 +46,7 @@ type RemoteInfo = {
   logs: number;
   totalXp: number;
   updatedAt: string;
+  etag?: string;
   taskList: RemoteTask[];
 };
 
@@ -59,6 +60,7 @@ type RemoteConflict = {
   remoteText: string;
   remoteUpdatedAt: string;
   localUpdatedAt: string;
+  remoteEtag?: string;
 };
 
 type ReplacementNotice = {
@@ -92,6 +94,27 @@ const formatDateTime = (iso?: string) => {
 
 const getBackupUpdatedAt = (backup: Partial<QuestBackup>) =>
   backup.updatedAt ?? backup.exportedAt ?? new Date(0).toISOString();
+
+const getArchiveCutoffIso = (days: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString();
+};
+
+const getOldLogs = (logs: ProgressLog[], cutoffIso: string) =>
+  logs.filter((log) => new Date(log.at).getTime() < new Date(cutoffIso).getTime());
+
+const getLogArchiveText = (logs: ProgressLog[], cutoffIso: string) =>
+  JSON.stringify(
+    {
+      app: "questflow-log-archive",
+      exportedAt: new Date().toISOString(),
+      cutoffIso,
+      logs
+    },
+    null,
+    2
+  );
 
 const parseBackup = (raw: string) => {
   const parsed = JSON.parse(raw) as Partial<QuestBackup>;
@@ -191,6 +214,7 @@ export default function SyncPage() {
   const importData = useQuestStore((state) => state.importData);
   const clearAll = useQuestStore((state) => state.clearAll);
   const markSynced = useQuestStore((state) => state.markSynced);
+  const pruneLogsBefore = useQuestStore((state) => state.pruneLogsBefore);
 
   const [mounted, setMounted] = useState(false);
   const [config, setConfig] = useState<PublicWebDavConfig>(emptyConfig);
@@ -224,7 +248,7 @@ export default function SyncPage() {
       });
   }, []);
 
-  const updateRemoteInfo = useCallback((remoteText: string | null) => {
+  const updateRemoteInfo = useCallback((remoteText: string | null, remoteEtag?: string | null) => {
     if (!remoteText) {
       setRemoteInfo(null);
       return;
@@ -236,6 +260,7 @@ export default function SyncPage() {
         logs: backup.logs.length,
         totalXp: backup.totalXp ?? 0,
         updatedAt: getBackupUpdatedAt(backup),
+        etag: remoteEtag ?? undefined,
         taskList: backup.tasks.map((t) => ({
           title: t.title ?? "Untitled",
           progressCount: t.progressCount ?? 0,
@@ -253,8 +278,8 @@ export default function SyncPage() {
     let cancelled = false;
     const refresh = async () => {
       try {
-        const result = await postWebDav<{ ok: boolean; missing?: boolean; data?: string }>({ action: "download" });
-        if (!cancelled) updateRemoteInfo(!result.missing && result.data ? result.data : null);
+        const result = await postWebDav<{ ok: boolean; missing?: boolean; data?: string; etag?: string }>({ action: "download" });
+        if (!cancelled) updateRemoteInfo(!result.missing && result.data ? result.data : null, result.etag);
       } catch {
         if (!cancelled) setRemoteInfo(null);
       }
@@ -326,7 +351,7 @@ export default function SyncPage() {
     }
   };
 
-  const uploadLocalToWebDav = async (markAsSynced = true) => {
+  const uploadLocalToWebDav = async (markAsSynced = true, expectedEtag = remoteInfo?.etag) => {
     setBusy("webdav-export");
     setMessage(null);
 
@@ -336,10 +361,11 @@ export default function SyncPage() {
         showMessage({ type: "error", text: "本机无数据，无法上传空的存档覆盖云端。" });
         return false;
       }
-      await postWebDav({ action: "upload", payload: snapshot });
+      await postWebDav({ action: "upload", payload: snapshot, ifMatch: expectedEtag });
       const syncedAt = new Date().toISOString();
       if (markAsSynced) markSynced(syncedAt);
-      updateRemoteInfo(await downloadRemoteText());
+      const refreshed = await downloadRemoteSnapshot();
+      updateRemoteInfo(refreshed?.text ?? null, refreshed?.etag);
       showMessage({ type: "success", text: "本机存档已导出到 WebDAV。" });
       showReplacementNotice("已完成本机覆盖云端", "本机存档已上传到 WebDAV，云端存档已被本机数据替换。");
       return true;
@@ -351,7 +377,7 @@ export default function SyncPage() {
     }
   };
 
-  const downloadRemoteText = async () => {
+  const downloadRemoteSnapshot = async () => {
     const result = await postWebDav<{
       ok: boolean;
       missing?: boolean;
@@ -361,7 +387,7 @@ export default function SyncPage() {
     }>({ action: "download" });
 
     if (!result.missing && result.data) {
-      return result.data;
+      return { text: result.data, etag: result.etag ?? undefined };
     }
 
     if (config.filePath !== legacyBackupFilePath) {
@@ -374,11 +400,25 @@ export default function SyncPage() {
       }>({ action: "download", target: "legacy" });
 
       if (!legacyResult.missing && legacyResult.data) {
-        return legacyResult.data;
+        return { text: legacyResult.data, etag: legacyResult.etag ?? undefined };
       }
     }
 
     return null;
+  };
+
+  const downloadRemoteText = async () => (await downloadRemoteSnapshot())?.text ?? null;
+
+  const archiveOldLogs = () => {
+    const cutoffIso = getArchiveCutoffIso(90);
+    const oldLogs = getOldLogs(logs, cutoffIso);
+    if (oldLogs.length === 0) {
+      showMessage({ type: "info", text: "没有 90 天前的日志需要归档。" });
+      return;
+    }
+    downloadTextFile(getLogArchiveText(oldLogs, cutoffIso), `questflow-log-archive-before-${cutoffIso.slice(0, 10)}.json`);
+    const removed = pruneLogsBefore(cutoffIso);
+    showMessage({ type: "success", text: `已导出并压缩 ${removed} 条旧日志。` });
   };
 
   const importFromWebDav = async () => {
@@ -396,7 +436,8 @@ export default function SyncPage() {
       parseBackup(remoteText);
       const syncedAt = new Date().toISOString();
       const ok = importData(remoteText, { markSyncedAt: syncedAt });
-      updateRemoteInfo(await downloadRemoteText());
+      const refreshed = await downloadRemoteSnapshot();
+      updateRemoteInfo(refreshed?.text ?? null, refreshed?.etag);
       showMessage({
         type: ok ? "success" : "error",
         text: ok ? "已从 WebDAV 导入云端存档。" : "WebDAV 存档导入失败。"
@@ -438,7 +479,9 @@ export default function SyncPage() {
     setConflict(null);
 
     try {
-      const remoteText = await downloadRemoteText();
+      const remoteSnapshot = await downloadRemoteSnapshot();
+      const remoteText = remoteSnapshot?.text ?? null;
+      const remoteEtag = remoteSnapshot?.etag;
 
       if (!remoteText) {
         const local = getBackupData();
@@ -448,7 +491,8 @@ export default function SyncPage() {
         }
         await postWebDav({ action: "upload", payload: local });
         markSynced(new Date().toISOString());
-        updateRemoteInfo(await downloadRemoteText());
+        const refreshed = await downloadRemoteSnapshot();
+        updateRemoteInfo(refreshed?.text ?? null, refreshed?.etag);
         showMessage({ type: "success", text: "云端无存档，已上传本机存档作为初始云端版本。" });
         showReplacementNotice("已完成本机上传云端", "云端原本没有存档，已使用本机存档创建云端版本。");
         return;
@@ -465,7 +509,7 @@ export default function SyncPage() {
       if (localIsEmpty) {
         const syncedAt = new Date().toISOString();
         importData(remoteText, { markSyncedAt: syncedAt });
-        updateRemoteInfo(await downloadRemoteText());
+        updateRemoteInfo(remoteText, remoteEtag);
         showMessage({ type: "success", text: "本机无数据，已从云端下载存档。" });
         showReplacementNotice("已完成云端覆盖本机", "本机原本没有存档，已使用 WebDAV 云端存档恢复本机数据。");
         return;
@@ -479,7 +523,8 @@ export default function SyncPage() {
         setConflict({
           remoteText,
           remoteUpdatedAt,
-          localUpdatedAt: local.updatedAt
+          localUpdatedAt: local.updatedAt,
+          remoteEtag
         });
         showMessage({ type: "info", text: "本机和云端都有新改动，请选择保留哪一份存档。" });
         return;
@@ -493,7 +538,7 @@ export default function SyncPage() {
           description: `云端存档（${formatDateTime(remoteUpdatedAt)}）较新，同步后将替换当前本机数据。`,
           onConfirm: () => {
             importData(remoteText, { markSyncedAt: new Date().toISOString() });
-            updateRemoteInfo(remoteText);
+            updateRemoteInfo(remoteText, remoteEtag);
             showMessage({ type: "success", text: "云端较新，已下载并应用云端存档。" });
             showReplacementNotice("已完成云端覆盖本机", "云端存档较新，已替换当前本机存档。");
           }
@@ -507,9 +552,10 @@ export default function SyncPage() {
           title: "确认覆盖云端存档？",
           description: "本机存档较新，同步后云端旧数据将被本机数据覆盖且无法恢复。",
           onConfirm: async () => {
-            await postWebDav({ action: "upload", payload: snapshot });
+            await postWebDav({ action: "upload", payload: snapshot, ifMatch: remoteEtag });
             markSynced(new Date().toISOString());
-            updateRemoteInfo(await downloadRemoteText());
+            const refreshed = await downloadRemoteSnapshot();
+            updateRemoteInfo(refreshed?.text ?? null, refreshed?.etag);
             showMessage({ type: "success", text: "本机较新，已上传本机存档。" });
             showReplacementNotice("已完成本机覆盖云端", "本机存档较新，已替换 WebDAV 云端存档。");
           }
@@ -532,7 +578,7 @@ export default function SyncPage() {
       title: "确认使用本机存档覆盖云端？",
       description: "此操作将上传本机存档并替换云端数据，云端旧存档将无法恢复。",
       onConfirm: async () => {
-        const ok = await uploadLocalToWebDav(true);
+        const ok = await uploadLocalToWebDav(true, conflict.remoteEtag);
         if (ok) setConflict(null);
       }
     });
@@ -546,6 +592,7 @@ export default function SyncPage() {
       onConfirm: () => {
         const syncedAt = new Date().toISOString();
         const ok = importData(conflict.remoteText, { markSyncedAt: syncedAt });
+        updateRemoteInfo(conflict.remoteText, conflict.remoteEtag);
         setConflict(null);
         showMessage({
           type: ok ? "success" : "error",
@@ -894,6 +941,14 @@ export default function SyncPage() {
             >
               <Download size={16} />
               导出事件 Log
+            </button>
+            <button
+              type="button"
+              onClick={archiveOldLogs}
+              className="focus-ring inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50"
+            >
+              <Database size={16} />
+              压缩 90 天前日志
             </button>
             <button
               type="button"

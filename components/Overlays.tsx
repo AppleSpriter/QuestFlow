@@ -17,7 +17,7 @@ import type { ResonanceTrigger } from "@/data/resonance";
 
 export function FocusChangedOverlay() {
   return (
-    <motion.div className="pointer-events-none fixed inset-x-0 top-20 z-50 mx-auto flex w-fit items-center gap-2 rounded-lg border border-sky-200 bg-white px-4 py-3 text-sm font-semibold text-sky-700 shadow-lift"
+    <motion.div className="pointer-events-none fixed inset-x-0 top-20 z-50 mx-auto flex w-fit items-center gap-2 rounded-lg border border-sky-200 bg-white px-4 py-3 text-sm font-semibold text-sky-700 shadow-lift dark:border-sky-500/40 dark:bg-slate-900 dark:text-sky-200"
       initial={{ opacity: 0, y: -18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -18, scale: 0.96 }} transition={{ duration: 0.18 }}>
       <Target size={17} /> Focus Changed
     </motion.div>
@@ -26,7 +26,7 @@ export function FocusChangedOverlay() {
 
 export function QuestCreatedOverlay({ title }: { title: string }) {
   return (
-    <motion.div className="pointer-events-none fixed inset-x-0 top-32 z-50 mx-auto flex w-fit max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lift"
+    <motion.div className="pointer-events-none fixed inset-x-0 top-32 z-50 mx-auto flex w-fit max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lift dark:border-emerald-500/40 dark:bg-slate-900 dark:text-emerald-200"
       initial={{ opacity: 0, y: -18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -18, scale: 0.96 }} transition={{ duration: 0.18 }}>
       <CheckCircle2 size={17} />
       <span className="min-w-0 truncate">Quest Created · {title}</span>
@@ -62,12 +62,12 @@ export function MilestoneOverlay({ result }: { result: ProgressResult }) {
             transition={{ duration: 2.2 + (i % 5) * 0.15, ease: "linear", delay: 0.4 + (i % 8) * 0.06 }} />
         );
       })}
-      <motion.div className="rounded-2xl border-2 border-amber-200 bg-white px-8 py-6 text-center shadow-lift"
+      <motion.div className="rounded-2xl border-2 border-amber-200 bg-white px-8 py-6 text-center shadow-lift dark:border-amber-500/50 dark:bg-slate-900"
         initial={{ scale: 0.5, y: 30, rotate: -5 }} animate={{ scale: [0.5, 1.15, 0.95, 1], y: 0, rotate: [-5, 2, 0] }} exit={{ scale: 0.9, opacity: 0 }} transition={{ duration: 0.6, ease: "easeOut" }}>
         <motion.div animate={{ rotate: [0, -10, 10, -5, 0], scale: [1, 1.2, 1] }} transition={{ duration: 0.6, delay: 0.2 }}>
           <Trophy className="mx-auto text-amber-500" size={42} />
         </motion.div>
-        <div className="mt-3 text-2xl font-bold text-slate-950">已推进 {result.milestone} 次</div>
+        <div className="mt-3 text-2xl font-bold text-slate-950 dark:text-slate-100">已推进 {result.milestone} 次</div>
         <div className="mt-2 text-base font-semibold text-amber-600">Milestone +{result.xpAwarded} XP</div>
       </motion.div>
     </motion.div>
@@ -78,14 +78,14 @@ export function NormalResonanceEffect({ resonance }: { resonance: ResonanceTrigg
   const [firstClass, secondClass] = resonance.classes;
   return (
     <motion.div
-      className="pointer-events-none fixed inset-x-0 bottom-8 z-40 mx-auto w-72 rounded-3xl border border-purple-200 bg-white/95 p-4 shadow-2xl backdrop-blur will-change-transform"
+      className="pointer-events-none fixed inset-x-0 bottom-8 z-40 mx-auto w-72 rounded-3xl border border-purple-200 bg-white/95 p-4 shadow-2xl backdrop-blur will-change-transform dark:border-purple-500/40 dark:bg-slate-900/95"
       initial={{ opacity: 0, y: 28, scale: 0.96 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 24, scale: 0.98 }}
       transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
     >
       <motion.div
-        className="absolute inset-0 rounded-3xl bg-gradient-to-br from-purple-100/70 via-white/0 to-amber-100/70"
+        className="absolute inset-0 rounded-3xl bg-gradient-to-br from-purple-100/70 via-white/0 to-amber-100/70 dark:from-purple-500/20 dark:via-slate-900/0 dark:to-amber-500/15"
         initial={{ opacity: 0 }}
         animate={{ opacity: [0.35, 0.65, 0.35] }}
         transition={{ duration: 1.2, ease: "easeInOut" }}
@@ -99,9 +99,9 @@ export function NormalResonanceEffect({ resonance }: { resonance: ResonanceTrigg
           ✨ 职业共鸣
         </motion.div>
         <motion.div className="mt-1 text-center" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.28, duration: 0.22, ease: "easeOut" }}>
-          <div className="text-lg font-black text-slate-950">{resonance.reward.emoji} {resonance.name}</div>
-          <div className="text-sm font-bold text-amber-700">{resonance.reward.shortLabel}</div>
-          {resonance.leveledUp ? <div className="mt-1 text-xs font-bold text-violet-600">✨ 共鸣升级 Lv{resonance.previousLevel} → Lv{resonance.level}</div> : null}
+          <div className="text-lg font-black text-slate-950 dark:text-slate-100">{resonance.reward.emoji} {resonance.name}</div>
+          <div className="text-sm font-bold text-amber-700 dark:text-amber-300">{resonance.reward.shortLabel}</div>
+          {resonance.leveledUp ? <div className="mt-1 text-xs font-bold text-violet-600 dark:text-violet-300">✨ 共鸣升级 Lv{resonance.previousLevel} → Lv{resonance.level}</div> : null}
           {resonance.chainCount > 1 ? <div className="mt-1 text-xs font-black text-fuchsia-600">⚡ 共鸣链 x{resonance.chainCount}{resonance.chainBonus ? " · 额外卷轴 ×1" : ""}</div> : null}
         </motion.div>
       </div>
@@ -123,7 +123,7 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
       aria-label="新共鸣发现"
     >
       <motion.div
-        className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/80 bg-white p-6 text-center shadow-2xl"
+        className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/80 bg-white p-6 text-center shadow-2xl dark:border-violet-500/30 dark:bg-slate-900"
         initial={{ opacity: 0, scale: 0.82, y: 24 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.94, y: 12 }}
@@ -131,7 +131,7 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
         onClick={(event) => event.stopPropagation()}
       >
         <motion.div
-          className="absolute inset-0 bg-gradient-to-br from-violet-100/80 via-transparent to-amber-100/80"
+          className="absolute inset-0 bg-gradient-to-br from-violet-100/80 via-transparent to-amber-100/80 dark:from-violet-500/20 dark:via-transparent dark:to-amber-500/15"
           animate={{ opacity: [0.5, 0.9, 0.55] }}
           transition={{ duration: 2.4, repeat: Infinity }}
         />
@@ -143,14 +143,14 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
             {[firstClass, secondClass].map((cn, index) => (
               <motion.div
                 key={cn}
-                className="flex h-20 w-20 flex-col items-center justify-center rounded-3xl border bg-white shadow-lg"
+                className="flex h-20 w-20 flex-col items-center justify-center rounded-3xl border bg-white shadow-lg dark:bg-slate-950/70"
                 style={{ borderColor: CLASS_META[cn].hexColor }}
                 initial={{ x: index === 0 ? -80 : 80, opacity: 0, rotate: index === 0 ? -12 : 12 }}
                 animate={{ x: 0, opacity: 1, rotate: 0 }}
                 transition={{ delay: 0.12 + index * 0.08, type: "spring", stiffness: 180, damping: 14 }}
               >
                 <span className="text-3xl">{CLASS_META[cn].emoji}</span>
-                <span className="mt-1 text-xs font-bold text-slate-600">{cn}</span>
+                <span className="mt-1 text-xs font-bold text-slate-600 dark:text-slate-200">{cn}</span>
               </motion.div>
             ))}
           </div>
@@ -163,18 +163,18 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
             ⚡
           </motion.div>
           <motion.h2
-            className="mt-2 text-3xl font-black text-slate-950"
+            className="mt-2 text-3xl font-black text-slate-950 dark:text-slate-100"
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: [0.85, 1.08, 1] }}
             transition={{ delay: 0.52, duration: 0.45 }}
           >
             {resonance.reward.emoji} {resonance.name}
           </motion.h2>
-          <div className="mt-3 inline-flex rounded-full bg-violet-100 px-4 py-2 text-sm font-bold text-violet-700">
+          <div className="mt-3 inline-flex rounded-full bg-violet-100 px-4 py-2 text-sm font-bold text-violet-700 dark:bg-violet-500/20 dark:text-violet-200">
             奖励：{resonance.reward.emoji} {resonance.reward.shortLabel}
           </div>
-          <p className="mt-3 text-sm font-bold text-emerald-600">已收录至共鸣圣殿 · 进度 {discoveredCount} / 66</p>
-          <p className="mt-4 text-sm leading-6 text-slate-600">{resonance.description}</p>
+          <p className="mt-3 text-sm font-bold text-emerald-600 dark:text-emerald-300">已收录至共鸣圣殿 · 进度 {discoveredCount} / 66</p>
+          <p className="mt-4 text-sm leading-6 text-slate-600 dark:text-slate-300">{resonance.description}</p>
           <div className="mt-5 grid grid-cols-2 gap-2">
             <Link
               href="/resonance"
@@ -186,7 +186,7 @@ export function NewResonanceModal({ resonance, discoveredCount, onClose }: { res
             <button
               type="button"
               onClick={onClose}
-              className="focus-ring rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98]"
+              className="focus-ring rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 active:scale-[0.98] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               继续冒险
             </button>
@@ -203,11 +203,11 @@ export function FeatChoiceModal({ choice, onClose, onSelect }: { choice: Pending
   const selectedFeat = selectedFeatId ? FEAT_MAP[selectedFeatId] : null;
   return (
     <motion.div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-      <motion.div className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-white/80 bg-white shadow-2xl" initial={{ opacity: 0, y: 28, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.97 }}>
-        <div className="bg-gradient-to-br from-amber-50 via-white to-violet-50 p-6 text-center">
+      <motion.div className="w-full max-w-3xl overflow-hidden rounded-[2rem] border border-white/80 bg-white shadow-2xl dark:border-amber-500/30 dark:bg-slate-900" initial={{ opacity: 0, y: 28, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.97 }}>
+        <div className="bg-gradient-to-br from-amber-50 via-white to-violet-50 p-6 text-center dark:from-amber-950/40 dark:via-slate-900 dark:to-violet-950/50">
           <div className="text-sm font-black uppercase tracking-[0.24em] text-amber-500">Feat Point Unlocked</div>
-          <h2 className="mt-2 text-3xl font-black text-slate-950">{meta.emoji} {choice.className} Lv{choice.level} 专长选择</h2>
-          <p className="mt-2 text-sm font-semibold text-slate-500">先点选一个专长，再点击底部确认。也可以稍后在 Build 页面选择。</p>
+          <h2 className="mt-2 text-3xl font-black text-slate-950 dark:text-slate-100">{meta.emoji} {choice.className} Lv{choice.level} 专长选择</h2>
+          <p className="mt-2 text-sm font-semibold text-slate-500 dark:text-slate-400">先点选一个专长，再点击底部确认。也可以稍后在 Build 页面选择。</p>
         </div>
         <div className="grid gap-3 p-5 md:grid-cols-3">
           {choice.choices.map((featId) => {
@@ -220,7 +220,7 @@ export function FeatChoiceModal({ choice, onClose, onSelect }: { choice: Pending
                 key={feat.id}
                 type="button"
                 onClick={() => setSelectedFeatId(feat.id)}
-                className={`focus-ring group rounded-3xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-amber-300 hover:shadow-lift active:scale-[0.98] ${selected ? "border-amber-400 ring-4 ring-amber-100" : "border-slate-200"}`}
+                className={`focus-ring group rounded-3xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-amber-300 hover:shadow-lift active:scale-[0.98] dark:bg-slate-950/80 dark:hover:border-amber-400 ${selected ? "border-amber-400 ring-4 ring-amber-100 dark:ring-amber-500/20" : "border-slate-200 dark:border-slate-700"}`}
                 aria-pressed={selected}
                 aria-label={`选择专长 ${feat.name}`}
               >
@@ -230,10 +230,10 @@ export function FeatChoiceModal({ choice, onClose, onSelect }: { choice: Pending
                     {quality.emoji} {quality.label}
                   </span>
                 </div>
-                <div className="mt-3 text-xl font-black text-slate-950">{feat.name}</div>
+                <div className="mt-3 text-xl font-black text-slate-950 dark:text-slate-100">{feat.name}</div>
                 <div className="mt-1 text-xs font-black" style={{ color: flow.color }}>{flow.emoji} {flow.label}</div>
-                <p className="mt-3 text-sm font-bold text-slate-700">{feat.summary}</p>
-                <p className="mt-2 text-xs leading-5 text-slate-500">{feat.detail}</p>
+                <p className="mt-3 text-sm font-bold text-slate-700 dark:text-slate-300">{feat.summary}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{feat.detail}</p>
                 <div className={`mt-4 rounded-2xl px-3 py-2 text-center text-sm font-black transition ${selected ? "bg-amber-500 text-white" : "bg-slate-950 text-white opacity-0 group-hover:opacity-100"}`}>
                   {selected ? "已选中，等待确认" : "点选此专长"}
                 </div>
@@ -241,13 +241,13 @@ export function FeatChoiceModal({ choice, onClose, onSelect }: { choice: Pending
             );
           })}
         </div>
-        <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm font-bold text-slate-500">
+        <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-950/70 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm font-bold text-slate-500 dark:text-slate-400">
             {selectedFeat ? `将永久选择：${selectedFeat.emoji} ${selectedFeat.name}` : "未选择前不会写入存档。"}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/build" onClick={() => onClose(choice.id)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-50 active:scale-[0.98]">去 Build 页面</Link>
-            <button type="button" onClick={() => onClose(choice.id)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-50 active:scale-[0.98]">稍后再选</button>
+            <Link href="/build" onClick={() => onClose(choice.id)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-50 active:scale-[0.98] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">去 Build 页面</Link>
+            <button type="button" onClick={() => onClose(choice.id)} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-50 active:scale-[0.98] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">稍后再选</button>
             <button type="button" disabled={!selectedFeatId} onClick={() => selectedFeatId && onSelect(choice.id, selectedFeatId)} className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-black text-white transition hover:bg-slate-800 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-300">
               确认选择（永久）
             </button>
@@ -270,7 +270,7 @@ export function LongRestSummaryModal({ summary, onClose }: { summary: LongRestSu
       onClick={onClose}
     >
           <motion.div
-            className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+            className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
             role="dialog"
             aria-modal="true"
             aria-label="今日冒险总结"
@@ -281,8 +281,8 @@ export function LongRestSummaryModal({ summary, onClose }: { summary: LongRestSu
       >
         <div className="mb-4 text-center">
           <Tent className="mx-auto text-emerald-500" size={36} />
-          <h2 className="mt-2 text-2xl font-bold text-slate-950">🏕 今日冒险总结</h2>
-          <p className="text-sm text-slate-500">{summary.date}</p>
+          <h2 className="mt-2 text-2xl font-bold text-slate-950 dark:text-slate-100">🏕 今日冒险总结</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{summary.date}</p>
         </div>
 
         <div className="space-y-3">
@@ -296,13 +296,13 @@ export function LongRestSummaryModal({ summary, onClose }: { summary: LongRestSu
                   <span className="text-2xl">{meta.emoji}</span>
                   <div>
                     <h3 className={`text-lg font-bold ${meta.color}`}>{cn}（{meta.label}）</h3>
-                    <p className="text-xs text-slate-500">+{cs.progressCount} Progress · +{cs.xpGained} XP{cs.scrollsEarned > 0 ? ` · 📜 x${cs.scrollsEarned}` : ""}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-300">+{cs.progressCount} Progress · +{cs.xpGained} XP{cs.scrollsEarned > 0 ? ` · 📜 x${cs.scrollsEarned}` : ""}</p>
                   </div>
                 </div>
                 {cs.skillEvents.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {cs.skillEvents.map((evt, i) => (
-                      <span key={i} className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold text-violet-700">⬆️ {evt}</span>
+                      <span key={i} className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-semibold text-violet-700 dark:bg-slate-950/70 dark:text-violet-200">⬆️ {evt}</span>
                     ))}
                   </div>
                 )}
@@ -313,16 +313,16 @@ export function LongRestSummaryModal({ summary, onClose }: { summary: LongRestSu
 
         <div className="mt-4 flex items-center justify-center gap-6 text-center">
           <div>
-            <div className="text-2xl font-bold text-slate-950">{summary.totalXp}</div>
-            <div className="text-xs text-slate-500">总经验</div>
+            <div className="text-2xl font-bold text-slate-950 dark:text-slate-100">{summary.totalXp}</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">总经验</div>
           </div>
           <div>
             <div className="text-2xl font-bold text-amber-600">{summary.totalScrolls}</div>
-            <div className="text-xs text-slate-500">总卷轴</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">总卷轴</div>
           </div>
           <div>
             <div className="text-2xl font-bold text-orange-600">🔥 {summary.streak}</div>
-            <div className="text-xs text-slate-500">连续天数</div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">连续天数</div>
           </div>
         </div>
 
